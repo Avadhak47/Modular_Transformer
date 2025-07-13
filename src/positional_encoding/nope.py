@@ -4,9 +4,10 @@ NoPE (No Positional Encoding) implementation.
 import torch
 import torch.nn as nn
 from typing import Dict, Any
+from .base import BasePositionalEncoding
 
 
-class NoPositionalEncoding(nn.Module):
+class NoPositionalEncoding(BasePositionalEncoding):
     """
     No Positional Encoding (NoPE) baseline.
     This class serves as a baseline that doesn't add any positional information.
@@ -21,10 +22,7 @@ class NoPositionalEncoding(nn.Module):
             max_len: Maximum sequence length (unused but kept for interface consistency)
             dropout: Dropout rate
         """
-        super().__init__()
-        self.d_model = d_model
-        self.max_len = max_len
-        self.dropout = nn.Dropout(dropout)
+        super().__init__(d_model, max_len, dropout)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

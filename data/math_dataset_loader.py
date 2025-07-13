@@ -36,7 +36,12 @@ class MathematicalDatasetLoader:
         """Load GSM8K dataset with proper preprocessing."""
         try:
             dataset = load_dataset("openai/gsm8k", "main", split=split)
-            self.logger.info(f"Successfully loaded GSM8K {split} split with {len(dataset)} examples")
+            # Handle IterableDataset which doesn't support len()
+            try:
+                num_examples = len(dataset) if isinstance(dataset, Dataset) else "unknown number of"
+            except (TypeError, AttributeError):
+                num_examples = "unknown number of"
+            self.logger.info(f"Successfully loaded GSM8K {split} split with {num_examples} examples")
         except Exception as e:
             self.logger.error(f"Failed to load GSM8K dataset: {e}")
             return []
@@ -69,47 +74,57 @@ class MathematicalDatasetLoader:
     
     def load_math_dataset(self, split: str = "train", max_samples: Optional[int] = None) -> List[MathematicalProblem]:
         """Load MATH dataset with comprehensive preprocessing."""
-        # Try multiple sources for MATH dataset
         dataset = None
         sources = [
-            "lighteval/MATH",
-            "hendrycks/competition_math", 
-            "competition_math"
+            ("Dahoas/MATH", ["train", "test"]),
+            ("HuggingFaceH4/MATH-500", ["test"])  # Only test split available
         ]
-        
-        for source in sources:
+
+        for source, valid_splits in sources:
+            if split not in valid_splits:
+                continue
             try:
-                dataset = load_dataset(source, split=split, trust_remote_code=True)
-                self.logger.info(f"Successfully loaded MATH dataset from {source}")
+                dataset = load_dataset(source, split=split)
+                # Handle IterableDataset which doesn't support len()
+                try:
+                    num_examples = len(dataset) if isinstance(dataset, Dataset) else "unknown number of"
+                except (TypeError, AttributeError):
+                    num_examples = "unknown number of"
+                self.logger.info(f"Successfully loaded MATH dataset from {source} ({split}) with {num_examples} examples")
                 break
             except Exception as e:
                 self.logger.warning(f"Failed to load from {source}: {e}")
                 continue
-        
+
         if dataset is None:
-            self.logger.error("Could not load MATH dataset from any source")
+            self.logger.error("Could not load MATH dataset from any supported source. Please download or provide the dataset manually.")
             return []
-        
+
         problems = []
-        total_items = len(dataset) if max_samples is None else min(len(dataset), max_samples)
-        
+        # Handle IterableDataset which doesn't support len()
+        try:
+            total_items = len(dataset) if isinstance(dataset, Dataset) else None
+            if max_samples is not None and total_items is not None:
+                total_items = min(total_items, max_samples)
+        except (TypeError, AttributeError):
+            total_items = None
+
         for idx, item in enumerate(dataset):
             if max_samples and idx >= max_samples:
                 break
-                
             try:
-                # Extract problem components
-                problem_text = item.get('problem', '')
-                solution = item.get('solution', '')
-                problem_type = item.get('type', 'Unknown')
-                level = item.get('level', 'Unknown')
-                
+                # Extract problem components (handle both Dahoas/MATH and H4/MATH-500 fields)
+                problem_text = item.get('problem', item.get('question', ''))
+                solution = item.get('solution', item.get('answer', ''))
+                problem_type = item.get('type', item.get('subject', 'Unknown'))
+                level = str(item.get('level', 'Unknown'))
+
                 # Process reasoning steps
                 reasoning_steps = self._extract_math_reasoning_steps(solution)
-                
+
                 # Extract final answer from boxed notation
                 final_answer = self._extract_math_final_answer(solution)
-                
+
                 problem = MathematicalProblem(
                     problem=problem_text,
                     solution=solution,
@@ -120,11 +135,10 @@ class MathematicalDatasetLoader:
                     dataset_source="math"
                 )
                 problems.append(problem)
-                
             except Exception as e:
                 self.logger.warning(f"Error processing MATH item {idx}: {e}")
                 continue
-        
+
         self.logger.info(f"Successfully processed {len(problems)} MATH problems")
         return problems
     
@@ -209,7 +223,7 @@ class MathematicalDatasetLoader:
             f"Solution:"
         )
     
-    def prepare_training_data(self, problems: List[MathematicalProblem]) -> Dict[str, torch.Tensor]:
+    def prepare_training_data(self, problems: List[MathematicalProblem]) -> Dict[str, Union[torch.Tensor, List[MathematicalProblem]]]:
         """Prepare tokenized training data with chain-of-thought format."""
         inputs = []
         targets = []
@@ -244,6 +258,5 @@ class MathematicalDatasetLoader:
         return {
             "input_ids": input_encodings["input_ids"],
             "attention_mask": input_encodings["attention_mask"],
-            "labels": target_encodings["input_ids"],
-            "problems": problems
+            "labels": target_encodings["input_ids"]
         }

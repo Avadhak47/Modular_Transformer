@@ -5,9 +5,10 @@ import torch
 import torch.nn as nn
 import math
 from typing import Dict, Any
+from .base import BasePositionalEncoding
 
 
-class SinusoidalPositionalEncoding(nn.Module):
+class SinusoidalPositionalEncoding(BasePositionalEncoding):
     """
     Sinusoidal positional encoding as described in 'Attention is All You Need'.
     Uses sine and cosine functions of different frequencies to encode position.
@@ -22,10 +23,7 @@ class SinusoidalPositionalEncoding(nn.Module):
             max_len: Maximum sequence length
             dropout: Dropout rate
         """
-        super().__init__()
-        self.d_model = d_model
-        self.max_len = max_len
-        self.dropout = nn.Dropout(dropout)
+        super().__init__(d_model, max_len, dropout)
         
         # Create positional encoding matrix
         pe = torch.zeros(max_len, d_model)
@@ -66,7 +64,7 @@ class SinusoidalPositionalEncoding(nn.Module):
             raise ValueError(f"Sequence length {seq_len} exceeds maximum length {self.max_len}")
         
         # Add positional encoding (broadcasting handles batch dimension)
-        x = x + self.pe[:, :seq_len, :]
+        x = x + self.get_buffer('pe')[:, :seq_len, :]
         return self.dropout(x)
     
     def get_encoding_type(self) -> str:
@@ -90,7 +88,7 @@ class SinusoidalPositionalEncoding(nn.Module):
         if seq_len > self.max_len:
             raise ValueError(f"Sequence length {seq_len} exceeds maximum length {self.max_len}")
         
-        return self.pe[:, :seq_len, :]
+        return self.get_buffer('pe')[:, :seq_len, :]
     
     def extend_max_len(self, new_max_len: int):
         """

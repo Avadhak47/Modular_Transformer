@@ -1,0 +1,70 @@
+#!/bin/bash
+#PBS -N math_reasoning_training
+#PBS -q gpuq
+#PBS -l nodes=1:ppn=8:gpus=1
+#PBS -l mem=32GB
+#PBS -l walltime=24:00:00
+#PBS -o /scratch/$USER/math_reasoning/logs/training_${PBS_JOBID}.out
+#PBS -e /scratch/$USER/math_reasoning/logs/training_${PBS_JOBID}.err
+#PBS -j oe
+
+# Load required modules for IIT Delhi PADUM
+module load cuda/11.8
+module load singularity/3.8.0
+module load python/3.10
+
+# Set environment variables
+export CUDA_VISIBLE_DEVICES=0
+export OMP_NUM_THREADS=8
+export MKL_NUM_THREADS=8
+export PYTHONPATH=/scratch/$USER/math_reasoning:$PYTHONPATH
+
+# Create necessary directories
+mkdir -p /scratch/$USER/math_reasoning/logs
+mkdir -p /scratch/$USER/math_reasoning/checkpoints
+mkdir -p /scratch/$USER/math_reasoning/results
+mkdir -p /scratch/$USER/math_reasoning/data
+
+# Change to working directory
+cd /scratch/$USER/math_reasoning
+
+# Build Singularity container from Docker image
+echo "Building Singularity container..."
+singularity build --fakeroot math_reasoning.sif Singularity.def
+
+# Run training with different positional encoding methods
+echo "Starting training with sinusoidal positional encoding..."
+singularity run --nv math_reasoning.sif python train.py \
+    --config config.py \
+    --positional_encoding sinusoidal \
+    --epochs 10 \
+    --batch_size 8 \
+    --learning_rate 1e-4 \
+    --output_dir /scratch/$USER/math_reasoning/results/sinusoidal
+
+echo "Starting training with RoPE positional encoding..."
+singularity run --nv math_reasoning.sif python train.py \
+    --config config.py \
+    --positional_encoding rope \
+    --epochs 10 \
+    --batch_size 8 \
+    --learning_rate 1e-4 \
+    --output_dir /scratch/$USER/math_reasoning/results/rope
+
+echo "Starting training with ALiBi positional encoding..."
+singularity run --nv math_reasoning.sif python train.py \
+    --config config.py \
+    --positional_encoding alibi \
+    --epochs 10 \
+    --batch_size 8 \
+    --learning_rate 1e-4 \
+    --output_dir /scratch/$USER/math_reasoning/results/alibi
+
+# Run evaluation and comparison
+echo "Running comprehensive evaluation..."
+singularity run --nv math_reasoning.sif python evaluate.py \
+    --results_dir /scratch/$USER/math_reasoning/results \
+    --output_file /scratch/$USER/math_reasoning/results/comparison_results.json
+
+echo "Training and evaluation completed successfully!"
+echo "Results saved to: /scratch/$USER/math_reasoning/results/" 

@@ -5,9 +5,10 @@ import torch
 import torch.nn as nn
 import math
 from typing import Tuple
+from .base import BasePositionalEncoding
 
 
-class RotaryPositionalEncoding(nn.Module):
+class RotaryPositionalEncoding(BasePositionalEncoding):
     """
     Rotary Positional Encoding (RoPE) as described in RoFormer.
     Encodes position information using rotation matrices applied to query and key vectors.
@@ -23,10 +24,7 @@ class RotaryPositionalEncoding(nn.Module):
             dropout: Dropout rate
             base: Base for frequency computation
         """
-        super().__init__()
-        self.d_model = d_model
-        self.max_len = max_len
-        self.dropout = nn.Dropout(dropout)
+        super().__init__(d_model, max_len, dropout)
         self.base = base
         
         # RoPE requires even dimension for pairing

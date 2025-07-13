@@ -5,9 +5,10 @@ import torch
 import torch.nn as nn
 import math
 from typing import Optional
+from .base import BasePositionalEncoding
 
 
-class ALiBiPositionalEncoding(nn.Module):
+class ALiBiPositionalEncoding(BasePositionalEncoding):
     """
     ALiBi (Attention with Linear Biases) positional encoding.
     Adds linear biases to attention scores based on token distance.
@@ -23,11 +24,8 @@ class ALiBiPositionalEncoding(nn.Module):
             max_len: Maximum sequence length (not strictly enforced)
             dropout: Dropout rate
         """
-        super().__init__()
-        self.d_model = d_model
+        super().__init__(d_model, max_len, dropout)
         self.n_heads = n_heads
-        self.max_len = max_len
-        self.dropout = nn.Dropout(dropout)
         
         # Calculate slopes for each attention head
         slopes = self._get_slopes(n_heads)
@@ -93,7 +91,7 @@ class ALiBiPositionalEncoding(nn.Module):
         distances = distances.abs().float()
         
         # Apply slopes to distances (negative because we subtract from attention scores)
-        bias = -distances.unsqueeze(0) * self.slopes.unsqueeze(1).unsqueeze(2).to(device)
+        bias = -distances.unsqueeze(0) * torch.as_tensor(self.slopes).unsqueeze(1).unsqueeze(2).to(device)
         
         return bias
     
@@ -120,7 +118,7 @@ class ALiBiPositionalEncoding(nn.Module):
         # Apply slopes to past positions only
         bias = torch.where(
             rel_positions <= 0,
-            -rel_positions.abs().float().unsqueeze(0) * self.slopes.unsqueeze(1).unsqueeze(2).to(device),
+            -rel_positions.abs().float().unsqueeze(0) * torch.as_tensor(self.slopes).unsqueeze(1).unsqueeze(2).to(device),
             causal_mask.unsqueeze(0).to(device)
         )
         
@@ -138,9 +136,9 @@ class ALiBiPositionalEncoding(nn.Module):
         """Get information about the slopes used."""
         return {
             "n_heads": self.n_heads,
-            "slopes": self.slopes.tolist(),
-            "min_slope": self.slopes.min().item(),
-            "max_slope": self.slopes.max().item()
+            "slopes": torch.as_tensor(self.slopes).tolist(),
+            "min_slope": torch.as_tensor(self.slopes).min().item(),
+            "max_slope": torch.as_tensor(self.slopes).max().item()
         }
     
     def apply_bias_to_attention(self, attention_scores: torch.Tensor, causal: bool = False) -> torch.Tensor:

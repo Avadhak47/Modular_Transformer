@@ -79,6 +79,12 @@ class TransformerModel(nn.Module):
         elif pe_type == 'alibi':
             from .positional_encoding.alibi import ALiBiPositionalEncoding
             return ALiBiPositionalEncoding(self.d_model, self.n_heads, self.max_seq_len, self.dropout)
+        elif pe_type == 'diet':
+            from .positional_encoding.diet import DIETPositionalEncoding
+            return DIETPositionalEncoding(self.d_model, self.n_heads, self.max_seq_len, self.dropout)
+        elif pe_type == 't5_relative':
+            from .positional_encoding.t5_relative import T5RelativePositionalEncoding
+            return T5RelativePositionalEncoding(self.d_model, self.n_heads, self.max_seq_len, self.dropout)
         elif pe_type == 'nope':
             from .positional_encoding.nope import NoPositionalEncoding
             return NoPositionalEncoding(self.d_model, self.max_seq_len, self.dropout)
@@ -95,12 +101,18 @@ class TransformerModel(nn.Module):
             elif isinstance(module, nn.Embedding):
                 nn.init.normal_(module.weight, 0, 0.1)
     
-    def forward(self, src: torch.Tensor, tgt: torch.Tensor,
+    def forward(self, src: torch.Tensor, tgt: Optional[torch.Tensor] = None,
                 src_mask: Optional[torch.Tensor] = None,
-                tgt_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+                tgt_mask: Optional[torch.Tensor] = None,
+                labels: Optional[torch.Tensor] = None):
         """
         Forward pass through the transformer.
+        Compatible with HuggingFace-style interface for evaluation.
         """
+        # If tgt is None, use src for both (for evaluation compatibility)
+        if tgt is None:
+            tgt = src
+        
         # Embed and apply positional encoding
         src_embedded = self.src_embedding(src) * math.sqrt(self.d_model)
         tgt_embedded = self.tgt_embedding(tgt) * math.sqrt(self.d_model)
@@ -116,9 +128,21 @@ class TransformerModel(nn.Module):
         decoder_output = self.decoder(tgt_encoded, encoder_output, src_mask, tgt_mask, self.pos_encoding)
         
         # Output projection
-        output = self.output_projection(decoder_output)
+        logits = self.output_projection(decoder_output)
         
-        return output
+        # Return HuggingFace-style output if labels provided
+        if labels is not None:
+            # Calculate loss
+            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+            # Shift logits and labels for language modeling
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            
+            # Return dict with loss and logits (HuggingFace style)
+            return type('Output', (), {'loss': loss, 'logits': logits})()
+        
+        return logits
     
     def switch_positional_encoding(self, new_pe_type: str):
         """Switch to a different positional encoding method."""
@@ -126,3 +150,12 @@ class TransformerModel(nn.Module):
         config['positional_encoding'] = new_pe_type
         self.pos_encoding = self._create_positional_encoding(config)
         print(f"Switched to {new_pe_type} positional encoding")
+
+    def get_model_info(self) -> dict:
+        """Return model parameter statistics."""
+        total_params = sum(p.numel() for p in self.parameters())
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        return {
+            "total_parameters": total_params,
+            "trainable_parameters": trainable_params
+        }
