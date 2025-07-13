@@ -14,7 +14,7 @@ class T5RelativePositionalEncoding(BasePositionalEncoding):
     
     def __init__(self, d_model: int, n_heads: int, max_len: int = 5000, 
                  dropout: float = 0.1, num_buckets: int = 32, max_distance: int = 128):
-        super().__init__(d_model, max_len, dropout)
+        super().__init__(d_model, max_len, dropout = float(0.1))
         self.n_heads = n_heads
         self.num_buckets = num_buckets
         self.max_distance = max_distance
