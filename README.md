@@ -20,7 +20,7 @@ This project represents my comprehensive research framework for comparing differ
 - **Preflight Validation**: MacBook Air M1 preflight check script for deployment readiness
 - **HPC Automation**: Complete deployment pipeline for IIT Delhi PADUM cluster
 
-### 📊 **My Research Capabilities**
+### 📊 **Research Capabilities**
 
 - Systematic comparison of positional encoding methods
 - Mathematical reasoning performance evaluation
@@ -84,12 +84,12 @@ Transformer/
     └── test_positional_encoding.py
 ```
 
-## 🚀 **Getting Started with My Research**
+## 🚀 **Getting Started with Research**
 
 ### 1. **Environment Setup**
 
 ```bash
-# Clone my repository
+# Clone repository
 git clone <repository-url>
 cd Transformer
 
@@ -100,7 +100,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Run my preflight check (MacBook M1)
+# Run preflight check (MacBook M1)
 python mac_preflight_check.py
 ```
 
@@ -136,7 +136,7 @@ python evaluate.py \
     --output_dir evaluation_results
 ```
 
-## 📈 **How My Research Works**
+## 📈 **How Research Works**
 
 ### **1. Data Pipeline** (`data/math_dataset_loader.py`)
 
@@ -435,7 +435,7 @@ python -c "from data.math_dataset_loader import MathematicalDatasetLoader; loade
 
 ## 📚 **Research Applications**
 
-My framework enables comprehensive research on:
+This framework enables comprehensive research on:
 
 1. **Positional Encoding Comparison**: Systematic evaluation of different PE methods
 2. **Mathematical Reasoning**: Analysis of transformer performance on complex reasoning tasks
@@ -511,5 +511,3 @@ If you use this code in your research, please cite:
 - **Containerization**: ✅ Docker and Singularity images working
 - **Automation**: ✅ Complete deployment pipeline with monitoring
 - **Validation**: ✅ Comprehensive preflight checks for both local and HPC
-
-**🎉 My project is now fully functional, validated, and ready for deployment on both local M1 Mac and IIT Delhi's HPC system!**
