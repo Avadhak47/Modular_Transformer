@@ -96,24 +96,26 @@ class HPCPreflightChecker:
             return False
     
     def check_dependencies(self) -> bool:
-        """Check if all required dependencies are installed."""
+        """Check if all required dependencies are available in the current environment (module-based)."""
+        # List only packages that should be available via modules or base conda env
         required_packages = [
-            "torch", "transformers", "datasets", "numpy", 
-            "scipy", "pandas", "matplotlib", "seaborn",
-            "tensorboard", "tqdm", "scikit-learn"
+            "torch", "numpy", "scipy", "pandas", "matplotlib", "seaborn",
+            "tqdm", "scikit-learn"
         ]
-        
+        # Optionally add: 'transformers', 'datasets', 'tensorboard', 'wandb' if available as modules
         missing_packages = []
         for package in required_packages:
             try:
                 importlib.import_module(package)
             except ImportError:
                 missing_packages.append(package)
-        
         if missing_packages:
-            self.errors.append(f"Missing packages: {', '.join(missing_packages)}")
+            self.errors.append(
+                f"Missing packages: {', '.join(missing_packages)}. "
+                "Check if a module is available for these packages using 'module avail' and load it if possible. "
+                "If not, contact HPC support to request installation."
+            )
             return False
-        
         return True
     
     def check_code_syntax(self) -> bool:
@@ -318,35 +320,9 @@ class HPCPreflightChecker:
         return True
     
     def check_containerization(self) -> bool:
-        """Check Docker and Singularity setup."""
-        try:
-            # Check if Dockerfile exists and is valid
-            if not os.path.exists("Dockerfile"):
-                self.errors.append("Dockerfile not found")
-                return False
-            
-            # Check if requirements.txt exists
-            if not os.path.exists("requirements.txt"):
-                self.errors.append("requirements.txt not found")
-                return False
-            
-            # Test Docker build (dry run)
-            try:
-                result = subprocess.run(
-                    ["docker", "build", "--dry-run", "."],
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-                if result.returncode != 0:
-                    self.warnings.append("Docker build validation failed")
-            except Exception:
-                self.warnings.append("Docker not available or build test failed")
-            
-            return True
-        except Exception as e:
-            self.errors.append(f"Containerization check failed: {str(e)}")
-            return False
+        """Skip containerization check (no longer used)."""
+        self.warnings.append("Containerization (Docker/Singularity) is not used in the current workflow.")
+        return True
     
     def _print_summary(self):
         """Print comprehensive summary of all checks."""

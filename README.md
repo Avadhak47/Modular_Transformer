@@ -513,3 +513,88 @@ If you use this code in your research, please cite:
 - **Validation**: ✅ Comprehensive preflight checks for both local and HPC
 
 **🎉 My project is now fully functional, validated, and ready for deployment on both local M1 Mac and IIT Delhi's HPC system!**
+
+## 🏫 Running on IIT Delhi PADUM HPC (Module-Only, No Internet)
+
+1. **Zip and transfer your project:**
+   ```bash
+   zip -r Transformer.zip Transformer/
+   scp Transformer.zip <username>@hpc.iitd.ac.in:~/
+   ```
+
+2. **SSH and unzip:**
+   ```bash
+   ssh <username>@hpc.iitd.ac.in
+   unzip Transformer.zip
+   cd Transformer
+   ```
+
+3. **Load the recommended Anaconda/Miniconda module and clone the base environment:**
+   ```bash
+   module purge
+   module load apps/anaconda/3EnvCreation  # or apps/miniconda/24.7.1
+   conda create --prefix=~/transformer_env --clone base -y
+   conda activate ~/transformer_env
+   # (Optional) module load apps/pytorch/1.10.0/gpu/intelpython3.7
+   conda list
+   module avail
+   ```
+   > **Note:** Do NOT use `conda install` or `pip install` unless you know the package is available locally. If a required package is missing, check for a module or request it from HPC support.
+
+4. **Edit and submit your PBS script:**
+   ```bash
+   qsub submit_training.pbs
+   ```
+
+5. **Monitor with:**
+   ```bash
+   qstat -u $USER
+   tail -f output.log
+   ```
+
+---
+
+**On IIT Delhi HPC, use only the packages available via modules or pre-installed in the base Anaconda/Miniconda environment. Do not attempt to install new packages from the internet.**
+
+## 📄 Sample PBS Script (`submit_training.pbs`)
+
+```bash
+#!/bin/bash
+#PBS -N transformer_train
+#PBS -l select=1:ncpus=8:ngpus=1:mem=32G
+#PBS -l walltime=12:00:00
+#PBS -P <your_project_code>
+#PBS -o output.log
+#PBS -e error.log
+
+cd $PBS_O_WORKDIR
+
+module load apps/anaconda/3
+source activate ~/transformer_env
+
+python train.py --pe_type rope --epochs 10 --batch_size 4 --use_wandb --experiment_name "rope_mathematical_reasoning"
+```
+
+---
+
+## 📦 (Optional) Using `environment.yml` for Conda
+
+If you prefer Conda for all dependencies, create an `environment.yml`:
+
+```yaml
+name: transformer_env
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - <all your pip packages>
+```
+
+Then run:
+```bash
+conda env create --prefix=~/transformer_env -f environment.yml
+conda activate ~/transformer_env
+```

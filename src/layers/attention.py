@@ -31,52 +31,54 @@ class MultiHeadAttention(nn.Module):
                 mask: Optional[torch.Tensor] = None,
                 pos_encoding=None) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass with optional positional encoding support."""
-        batch_size, seq_len = query.size(0), query.size(1)
-        
+        batch_size = query.size(0)
+        q_len = query.size(1)
+        k_len = key.size(1)
+        v_len = value.size(1)
+
         # Linear projections and reshape for multi-head attention
-        Q = self.w_q(query).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
-        K = self.w_k(key).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
-        V = self.w_v(value).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
-        
+        Q = self.w_q(query).view(batch_size, q_len, self.n_heads, self.d_k).transpose(1, 2)
+        K = self.w_k(key).view(batch_size, k_len, self.n_heads, self.d_k).transpose(1, 2)
+        V = self.w_v(value).view(batch_size, v_len, self.n_heads, self.d_k).transpose(1, 2)
+
         # Apply RoPE if specified
         if pos_encoding and hasattr(pos_encoding, 'get_encoding_type') and pos_encoding.get_encoding_type() == 'rope':
-            # Reshape for RoPE application
-            Q_rope = Q.transpose(1, 2).contiguous().view(batch_size, seq_len, self.d_model)
-            K_rope = K.transpose(1, 2).contiguous().view(batch_size, seq_len, self.d_model)
+            Q_rope = Q.transpose(1, 2).contiguous().view(batch_size, q_len, self.d_model)
+            K_rope = K.transpose(1, 2).contiguous().view(batch_size, k_len, self.d_model)
             Q_rope, K_rope = pos_encoding.apply_to_query_key(Q_rope, K_rope)
-            Q = Q_rope.view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
-            K = K_rope.view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
-        
+            Q = Q_rope.view(batch_size, q_len, self.n_heads, self.d_k).transpose(1, 2)
+            K = K_rope.view(batch_size, k_len, self.n_heads, self.d_k).transpose(1, 2)
+
         # Compute attention scores
         scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
-        
+
         # Apply positional encoding bias if ALiBi or T5-relative
         if pos_encoding:
             if hasattr(pos_encoding, 'get_encoding_type'):
                 if pos_encoding.get_encoding_type() == 'alibi':
-                    alibi_bias = pos_encoding.get_alibi_bias(seq_len, query.device)
+                    alibi_bias = pos_encoding.get_alibi_bias(k_len, query.device)
                     scores += alibi_bias.unsqueeze(0)
                 elif pos_encoding.get_encoding_type() == 't5_relative':
-                    relative_bias = pos_encoding.get_bidirectional_bias(seq_len, query.device)
+                    relative_bias = pos_encoding.get_bidirectional_bias(k_len, query.device)
                     scores += relative_bias
-        
+
         # Apply mask if provided
         if mask is not None:
             scores = scores.masked_fill(mask == 0, -1e9)
-        
+
         # Apply softmax
         attention_weights = F.softmax(scores, dim=-1)
         attention_weights = self.dropout(attention_weights)
-        
+
         # Apply attention to values
         context = torch.matmul(attention_weights, V)
-        
+
         # Concatenate heads and put through final linear layer
         context = context.transpose(1, 2).contiguous().view(
-            batch_size, seq_len, self.d_model)
-        
+            batch_size, q_len, self.d_model)
+
         output = self.w_o(context)
-        
+
         return output, attention_weights
 
 

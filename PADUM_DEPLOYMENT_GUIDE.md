@@ -1,207 +1,106 @@
-# PADUM HPC Deployment Guide
+# IIT Delhi PADUM HPC Deployment Guide (Module-Only, No Internet)
 
-## Overview
-This guide provides complete automation for deploying the Mathematical Reasoning Transformer project to IIT Delhi PADUM HPC cluster.
+This guide explains how to run the Modular Transformer project on IIT Delhi PADUM HPC using only the modules and pre-installed packages provided by the cluster. **Do not attempt to install new packages from the internet.**
 
-## Prerequisites
-- PADUM account with GPU access
-- SSH access to `padum-login.iitd.ac.in`
-- Docker installed locally (for building image)
+---
 
-## Quick Start
+## 1. Transfer Your Project
 
-### 1. Automated Setup (Recommended)
+- Zip your project for faster transfer:
+  ```bash
+  zip -r Transformer.zip Transformer/
+  scp Transformer.zip <username>@hpc.iitd.ac.in:~/
+  ```
+- On HPC, unzip:
+  ```bash
+  ssh <username>@hpc.iitd.ac.in
+  unzip Transformer.zip
+  cd Transformer
+  ```
+
+---
+
+## 2. Set Up Python Environment (Module-Only)
+
+- **Load the recommended Anaconda/Miniconda module:**
+  ```bash
+  module purge
+  module load apps/anaconda/3EnvCreation  # or apps/miniconda/24.7.1
+  ```
+- **Clone the base environment (no internet required):**
+  ```bash
+  conda create --prefix=~/transformer_env --clone base -y
+  conda activate ~/transformer_env
+  ```
+- **(Optional) Load additional modules for ML frameworks if available:**
+  ```bash
+  module avail | grep -i pytorch
+  module load apps/pytorch/1.10.0/gpu/intelpython3.7  # Example, if needed
+  ```
+- **Check available packages:**
+  ```bash
+  conda list
+  module avail
+  ```
+- **Do NOT use `conda install` or `pip install` unless you know the package is available locally.**
+
+---
+
+## 3. Prepare PBS Job Script
+
+- Edit `submit_training.pbs` as follows:
+
 ```bash
-# Run the complete automation script
-./setup_padum_automation.sh <your_padum_username>
+#!/bin/bash
+#PBS -N transformer_train
+#PBS -l select=1:ncpus=8:ngpus=1:mem=32G
+#PBS -l walltime=12:00:00
+#PBS -P <your_project_code>
+#PBS -o output.log
+#PBS -e error.log
+
+cd $PBS_O_WORKDIR
+
+module purge
+module load apps/anaconda/3
+# (Optional) module load apps/pytorch/1.10.0/gpu/intelpython3.7
+conda activate ~/transformer_env
+
+python train.py --pe_type rope --epochs 10 --batch_size 4 --use_wandb --experiment_name "rope_mathematical_reasoning"
 ```
 
-This single command will:
-- Export Docker image as tarball
-- Transfer all files to PADUM
-- Build Singularity image on PADUM
-- Create all monitoring and automation scripts
-- Set up the complete deployment pipeline
+---
 
-### 2. Manual Setup (Alternative)
-If you prefer manual control:
+## 4. Submit and Monitor Your Job
 
-```bash
-# Step 1: Export and transfer
-./export_and_transfer.sh <your_padum_username>
+- Submit:
+  ```bash
+  qsub submit_training.pbs
+  ```
+- Monitor:
+  ```bash
+  qstat -u $USER
+  tail -f output.log
+  ```
 
-# Step 2: SSH to PADUM and build Singularity image
-ssh <username>@padum-login.iitd.ac.in
-cd /scratch/$USER/math_reasoning
+---
 
-# Load modules and build
-module load singularity/3.8.0
-module load cuda/11.8
-singularity build math-reasoning-transformer.sif math-reasoning-transformer.tar
-```
+## 5. Tips
 
-## Available Scripts
+- Replace `<username>` and `<your_project_code>` as appropriate.
+- Use `$SCRATCH` for large data, copy results to `$HOME` if needed.
+- Do NOT run heavy jobs on the login node.
+- Use `module avail` to see available modules.
+- Check logs (`output.log`, `error.log`) for debugging.
+- If a required package is missing, check for a module or request it from HPC support.
 
-### On Local Machine
-- `setup_padum_automation.sh` - Complete automation
-- `export_and_transfer.sh` - Export Docker and transfer files
-- `monitor_padum_job.sh` - Monitor individual jobs
+---
 
-### On PADUM (after setup)
-- `submit_all_experiments.sh` - Submit jobs for all PE methods
-- `monitor_dashboard.sh` - Dashboard view of all jobs
-- `monitor_padum_job.sh <job_id>` - Monitor specific job
-- `aggregate_results.sh` - Aggregate and compare results
-- `cleanup_padum.sh` - Clean up old files
+## 6. (Optional) Using Only Available Packages
 
-## Usage Examples
+- All dependencies must be satisfied by the base environment or loaded modules.
+- If you need a package not available, contact HPC support to request installation.
 
-### Submit All Experiments
-```bash
-# On PADUM
-cd /scratch/$USER/math_reasoning
-./submit_all_experiments.sh
-```
+---
 
-This submits jobs for all positional encoding methods:
-- sinusoidal
-- rope (RoPE)
-- alibi (ALiBi)
-- diet
-- nope
-- t5_relative
-
-### Monitor Jobs
-```bash
-# Dashboard view
-./monitor_dashboard.sh
-
-# Individual job monitoring
-./monitor_padum_job.sh <job_id>
-```
-
-### Check Results
-```bash
-# Aggregate all results
-./aggregate_results.sh
-
-# View results
-cat /scratch/$USER/math_reasoning/results/experiment_summary.txt
-```
-
-## File Structure on PADUM
-```
-/scratch/$USER/math_reasoning/
-├── math-reasoning-transformer.sif    # Singularity image
-├── submit_training.pbs              # PBS job script
-├── submit_all_experiments.sh        # Automated submission
-├── monitor_dashboard.sh             # Dashboard monitoring
-├── monitor_padum_job.sh            # Individual job monitoring
-├── aggregate_results.sh             # Results aggregation
-├── cleanup_padum.sh                # Cleanup utility
-├── logs/                           # Job logs
-├── results/                        # Experiment results
-├── checkpoints/                    # Model checkpoints
-└── data/                          # Dataset cache
-```
-
-## Troubleshooting
-
-### Common Issues
-
-#### 1. Singularity Build Fails
-```bash
-# Check available modules
-module avail singularity
-module avail cuda
-
-# Try different CUDA version
-module load cuda/11.7
-```
-
-#### 2. Job Stuck in Queue
-```bash
-# Check queue status
-qstat -q
-
-# Check your job priority
-qstat -f <job_id>
-```
-
-#### 3. GPU Not Available
-```bash
-# Check GPU availability
-nvidia-smi
-
-# Check job requirements
-qstat -f <job_id> | grep resources
-```
-
-#### 4. Memory Issues
-```bash
-# Monitor memory usage
-qstat -f <job_id> | grep resources_used
-
-# Adjust memory in PBS script
-#PBS -l mem=64GB  # Increase if needed
-```
-
-#### 5. Storage Space Issues
-```bash
-# Check available space
-df -h /scratch/$USER
-
-# Clean up old files
-./cleanup_padum.sh
-```
-
-### Error Logs
-- Check `.out` files for standard output
-- Check `.err` files for error messages
-- Use `tail -f` for real-time monitoring
-
-### Performance Optimization
-- Use `OMP_NUM_THREADS=8` for optimal CPU utilization
-- Monitor GPU utilization with `nvidia-smi`
-- Adjust batch size based on available memory
-
-## Resource Requirements
-
-### Per Job
-- **GPU**: 1x V100 (32GB VRAM)
-- **CPU**: 8 cores
-- **Memory**: 32GB RAM
-- **Storage**: ~10GB for checkpoints and results
-- **Walltime**: 24 hours (adjustable)
-
-### Total Resources (All Experiments)
-- **Jobs**: 6 (one per PE method)
-- **Total Walltime**: 144 hours (6 × 24h)
-- **Storage**: ~60GB total
-
-## Security Notes
-- All scripts use your user account permissions
-- No root access required
-- Files stored in `/scratch/$USER/` (user-specific)
-- Singularity provides container isolation
-
-## Support
-For PADUM-specific issues:
-- Contact IIT Delhi HPC support
-- Check PADUM documentation
-- Use `qstat -f` for detailed job information
-
-## Best Practices
-1. **Monitor regularly** - Use dashboard script
-2. **Clean up periodically** - Run cleanup script weekly
-3. **Backup important results** - Copy to home directory
-4. **Check logs early** - Identify issues quickly
-5. **Use appropriate walltime** - Don't overestimate
-
-## Next Steps
-After successful deployment:
-1. Monitor job progress with dashboard
-2. Analyze results with aggregation script
-3. Compare positional encoding performance
-4. Generate final report with metrics
-5. Clean up resources when complete 
+**This workflow ensures your project runs reliably on IIT Delhi HPC without internet access or containerization.** 

@@ -25,15 +25,22 @@ tqdm==4.66.1
 scikit-learn==1.3.0
 accelerate==0.23.0
 
-# Development and testing
-pytest==7.4.0
-black==23.7.0
-flake8==6.0.0
-isort==5.12.0
-
 # Data processing
 editdistance==0.6.2
 psutil==5.9.5
+
+# Development and testing
+pytest==7.4.0
+pytest-cov==4.0.0
+black==23.7.0
+flake8==6.0.0
+isort==5.12.0
+mypy==0.991
+
+# Notebooks and visualization
+jupyter
+ipykernel
+plotly==5.0.0
 
 # Optional GPU acceleration (install based on system)
 nvidia-ml-py3==7.352.0
