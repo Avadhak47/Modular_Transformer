@@ -126,28 +126,63 @@ class TransformerTrainer:
         return loss.item()
     
     def validate(self, val_loader: DataLoader) -> Dict[str, float]:
-        """Perform validation."""
+        """Perform validation with additional mathematical reasoning metrics."""
+        from evaluation.mathematical_metrics import MathematicalReasoningEvaluator
         self.model.eval()
         val_loss = AverageMeter()
-        
+        all_predictions = []
+        all_ground_truths = []
+        all_attention_weights = []
+        evaluator = MathematicalReasoningEvaluator()
+
         with torch.no_grad():
             for batch in tqdm(val_loader, desc="Validation", leave=False):
                 src = batch['src'].to(self.device)
                 tgt = batch['tgt'].to(self.device)
-                
                 tgt_input = tgt[:, :-1]
                 tgt_output = tgt[:, 1:]
-                
+
                 logits = self.model(src, tgt_input)
                 loss = self.criterion(logits.reshape(-1, logits.size(-1)), tgt_output.reshape(-1))
-                
                 val_loss.update(loss.item(), src.size(0))
-        
+
+                # Get predictions (greedy decoding for demonstration)
+                preds = torch.argmax(logits, dim=-1)
+                # Convert predictions and ground truths to strings for evaluator
+                for i in range(preds.size(0)):
+                    pred_str = ' '.join(str(tok.item()) for tok in preds[i])
+                    gt_str = ' '.join(str(tok.item()) for tok in tgt_output[i])
+                    all_predictions.append(pred_str)
+                    all_ground_truths.append(gt_str)
+                # If model returns attention weights, collect them (optional)
+                # Example: if hasattr(self.model, 'last_attention_weights'):
+                #     all_attention_weights.append(self.model.last_attention_weights)
+
         perplexity = math.exp(min(val_loss.avg, 100))  # Clip to prevent overflow
-        
+
+        # Compute additional metrics
+        metrics = evaluator.exact_match_accuracy(all_predictions, all_ground_truths)
+        # For demonstration, use empty lists for reasoning chains/problems/solutions
+        reasoning_metrics = evaluator.reasoning_step_correctness([], [], [])
+        # Attention entropy: skipped unless attention weights are available
+
+        print(f"Validation | Loss: {val_loss.avg:.4f} | Perplexity: {perplexity:.4f}")
+        print(f"Exact Match Accuracy: {metrics['exact_match_accuracy']:.4f}")
+        print(f"Numerical Match Accuracy: {metrics['numerical_match_accuracy']:.4f}")
+        print(f"Normalized Match Accuracy: {metrics['normalized_match_accuracy']:.4f}")
+        print(f"Reasoning Step Correctness: {reasoning_metrics['reasoning_step_correctness']:.4f}")
+        print(f"Logical Validity: {reasoning_metrics['logical_validity']:.4f}")
+        print(f"Informativeness: {reasoning_metrics['informativeness']:.4f}")
+
         return {
             'val_loss': val_loss.avg,
-            'perplexity': perplexity
+            'perplexity': perplexity,
+            'exact_match_accuracy': metrics['exact_match_accuracy'],
+            'numerical_match_accuracy': metrics['numerical_match_accuracy'],
+            'normalized_match_accuracy': metrics['normalized_match_accuracy'],
+            'reasoning_step_correctness': reasoning_metrics['reasoning_step_correctness'],
+            'logical_validity': reasoning_metrics['logical_validity'],
+            'informativeness': reasoning_metrics['informativeness']
         }
     
     def save_checkpoint(self, is_best: bool = False):
@@ -339,7 +374,7 @@ def main():
     # Override with command line arguments
     config.training.batch_size = args.batch_size
     config.training.learning_rate = args.lr
-    config.training.max_steps = args.epochs * 1000  # Approximate steps per epoch
+    # config.training.max_steps = args.epochs * 1000  # Approximate steps per epoch
     config.training.use_wandb = args.wandb
     
     if args.experiment_name:

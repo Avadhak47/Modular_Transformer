@@ -12,6 +12,7 @@ class TrainingConfig:
     """Configuration for training parameters."""
     batch_size: int = 32
     learning_rate: float = 1e-4
+    min_delta: float = 1e-4
     max_steps: int = 100000
     warmup_steps: int = 4000
     gradient_clip: float = 1.0
@@ -24,6 +25,7 @@ class TrainingConfig:
     project_name: str = 'modular-transformer'
     experiment_name: str = 'default'
     checkpoint_dir: str = 'checkpoints'
+    log_interval: int = 100
     eval_interval: int = 1000
     save_interval: int = 5000
     patience: int = 5

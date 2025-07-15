@@ -121,24 +121,20 @@ class RotaryPositionalEncoding(BasePositionalEncoding):
         """
         Apply RoPE to query and key tensors separately.
         This is the typical usage in attention mechanisms.
-        
         Args:
-            q: Query tensor of shape (batch_size, seq_len, d_model)
-            k: Key tensor of shape (batch_size, seq_len, d_model)
-            
+            q: Query tensor of shape (batch_size, q_len, d_model)
+            k: Key tensor of shape (batch_size, k_len, d_model)
         Returns:
             Tuple of rotated (q, k) tensors
         """
-        assert q.size() == k.size(), "Query and key must have the same shape"
-        
-        seq_len = q.size(1)
+        # Remove the assertion; q and k can have different sequence lengths
+        q_len = q.size(1)
+        k_len = k.size(1)
         device = q.device
-        
-        # Get cos and sin values
-        cos_vals, sin_vals = self.get_cos_sin(seq_len, device)
-        
+        # Get cos and sin values for each length
+        cos_q, sin_q = self.get_cos_sin(q_len, device)
+        cos_k, sin_k = self.get_cos_sin(k_len, k.device)
         # Apply rotation to both query and key
-        q_rotated = self._apply_rotary_pos_emb(q, cos_vals, sin_vals)
-        k_rotated = self._apply_rotary_pos_emb(k, cos_vals, sin_vals)
-        
+        q_rotated = self._apply_rotary_pos_emb(q, cos_q, sin_q)
+        k_rotated = self._apply_rotary_pos_emb(k, cos_k, sin_k)
         return q_rotated, k_rotated
