@@ -1,0 +1,72 @@
+#!/bin/bash
+#PBS -N math_reasoning_multi_node
+#PBS -q gpuq
+#PBS -l select=5:ncpus=8:ngpus=1:mem=32gb
+#PBS -l walltime=48:00:00
+#PBS -j oe
+#PBS -o /scratch/$USER/jobs/multi_node_${PBS_JOBID}.out
+#PBS -e /scratch/$USER/jobs/multi_node_${PBS_JOBID}.err
+
+###############################################################################
+#  IIT DELHI PADUM - MULTI-NODE LLM TRAINING JOB (ENROOT)
+#  Each node trains one positional-encoding variant.
+###############################################################################
+
+# Load required modules
+module load cuda/11.8
+module load enroot/3.4.0   # adjust to cluster-provided version
+module load python/3.10
+module load openmpi/4.1.5  # required for mpirun if using inter-node comms
+
+# 1. Environment variables ----------------------------------------------------
+export IMAGE_PATH=/scratch/$USER/containers/math_reasoning.sqsh
+export OVERLAY_PATH=/scratch/$USER/containers/math_overlay.img  # optional
+
+# Map wandb directory (persistent; avoid $HOME quota)
+export WANDB_DIR=/scratch/$USER/wandb
+export WANDB_PROJECT=math-reasoning-HPC
+
+# Create scratch directories (once per node)
+mkdir -p $WANDB_DIR
+mkdir -p /scratch/$USER/math_reasoning/checkpoints
+mkdir -p /scratch/$USER/math_reasoning/results
+
+# 2. Determine positional encoding for this node -----------------------------
+PE_LIST=(sinusoidal rope alibi t5_relative diet)
+PE_TYPE=${PE_LIST[$PBS_NODENUM]}
+
+# 3. Enroot container create/start ------------------------------------------
+CONTAINER_NAME=math_env_${PE_TYPE}_${PBS_JOBID}
+
+# Only create if not exists (idempotent)
+enroot list | grep -q "${CONTAINER_NAME}" || \
+    enroot create --name $CONTAINER_NAME $IMAGE_PATH
+
+# 4. Run training inside the container --------------------------------------
+# NOTE: Using MPI + --hostfile is optional; since nodes are independent you can
+# simply launch the same command on each node without inter-process comms.
+
+enroot start --root --rw --nv \
+  --mount $OVERLAY_PATH:/overlay:rw \
+  $CONTAINER_NAME bash -c "\
+    cd /workspace && \
+    python HPC/hpc_train_launcher.py \
+      --positional_encoding ${PE_TYPE} \
+      --base_model_path /scratch/$USER/math_reasoning/sota_models/WizardMath-7B-V1.0.pt \
+      --experiment_suffix ${PBS_JOBID} \
+  "
+
+# 5. (Optional) Post-processing on master node -------------------------------
+if [ "$PE_TYPE" == "sinusoidal" ]; then
+  # Let first node gather & visualise once all jobs are finished
+  echo "Waiting for sibling nodes to finish..."
+  sleep 300  # crude sync; adjust via barrier file if needed
+  python visualize_eval_results.py \
+    --results_dir /scratch/$USER/math_reasoning/results \
+    --output_file /scratch/$USER/math_reasoning/results/aggregated_plots.pdf
+fi
+
+# 6. Cleanup instance (keeps checkpoints)
+enroot remove $CONTAINER_NAME
+
+echo "Node $(hostname) finished training with encoding ${PE_TYPE}."
