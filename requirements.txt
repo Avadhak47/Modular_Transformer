@@ -1,39 +1,52 @@
-# Core PyTorch ecosystem (compatible versions)
-torch==2.1.0
-torchvision==0.16.0  
-torchaudio==2.1.0
+# Core ML Framework
+torch>=2.1.0
+transformers>=4.36.0
+tokenizers>=0.15.0
+accelerate>=0.25.0
+peft>=0.7.0
+bitsandbytes>=0.41.0
 
-# Scientific computing stack
-numpy==1.24.3
-scipy==1.11.3
-pandas==2.0.3
-matplotlib==3.7.2
-seaborn==0.12.2
+# Mathematical Computing
+numpy>=1.24.0
+sympy>=1.12
+scipy>=1.11.0
+matplotlib>=3.7.0
+pandas>=2.1.0
 
-# ML and NLP libraries - FIXED DEPENDENCY VERSIONS
-transformers==4.35.0
-datasets==2.14.0
-tokenizers==0.14.0
-huggingface-hub==0.16.4  # CRITICAL FIX: Changed from 0.17.0 to 0.16.4 to resolve conflict
+# Deep Learning Utilities
+flash-attn>=2.4.0
+xformers>=0.0.23
+einops>=0.7.0
+safetensors>=0.4.0
 
-# Training and logging
-tensorboard==2.14.1
-wandb==0.15.12
-tqdm==4.66.1
+# Dataset Management
+datasets>=2.15.0
+huggingface-hub>=0.19.0
 
-# Additional ML dependencies
-scikit-learn==1.3.0
-accelerate==0.23.0
+# Evaluation and Metrics
+scikit-learn>=1.3.0
+seaborn>=0.12.0
+wandb>=0.16.0
 
-# Development and testing
-pytest==7.4.0
-black==23.7.0
-flake8==6.0.0
-isort==5.12.0
+# HPC and Distributed Training
+mpi4py>=3.1.0
+nvidia-ml-py>=12.535.0
 
-# Data processing
-editdistance==0.6.2
-psutil==5.9.5
+# Development and Testing
+pytest>=7.4.0
+black>=23.11.0
+flake8>=6.1.0
+pre-commit>=3.5.0
 
-# Optional GPU acceleration (install based on system)
-nvidia-ml-py3==7.352.0
+# Jupyter and Visualization
+jupyter>=1.0.0
+plotly>=5.17.0
+tqdm>=4.66.0
+
+# Configuration Management
+omegaconf>=2.3.0
+hydra-core>=1.3.0
+
+# Mathematical Tokenization
+tiktoken>=0.5.0
+sentencepiece>=0.1.99
