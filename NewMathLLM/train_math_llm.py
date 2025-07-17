@@ -16,16 +16,23 @@ def parse_args():
     parser.add_argument("--pe", type=str, required=True, choices=["xpos", "sinusoidal", "alibi+"], help="Positional encoding")
     parser.add_argument("--base", type=str, default="deepseek-ai/deepseek-math-7b-instruct", help="HF model repo or local path")
     parser.add_argument("--output", type=str, default="outputs", help="Output dir root")
-    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--context_length", type=int, default=2048)
+    parser.add_argument("--datasets_dir", type=str, default=None, help="Path to pre-downloaded dataset arrow files")
     return parser.parse_args()
 
 
-def get_dataset(context_len):
-    ds_math = load_dataset("math_dataset", "math_qa", split="train")  # HF community
-    ds_gsm8k = load_dataset("gsm8k", "main", split="train")
-    ds_dm = load_dataset("deepmind_math", split="train[:5000]")
+def get_dataset(context_len, datasets_dir=None):
+    if datasets_dir:
+        path = Path(datasets_dir)
+        ds_math = load_dataset("json", data_files=str(path / "math_qa.jsonl"), split="train")
+        ds_gsm8k = load_dataset("json", data_files=str(path / "gsm8k.jsonl"), split="train")
+        ds_dm = load_dataset("json", data_files=str(path / "deepmind_math.jsonl"), split="train")
+    else:
+        ds_math = load_dataset("lukaemon/math_qa", split="train")
+        ds_gsm8k = load_dataset("gsm8k", "main", split="train")
+        ds_dm = load_dataset("deepmind-math", split="train[:5000]")
     dataset = concatenate_datasets([ds_math, ds_gsm8k, ds_dm]).shuffle(seed=42)
 
     def preprocess(example):
@@ -43,8 +50,9 @@ def main():
     model = load_deepseek_with_pe(args.base, args.pe)
     tokenizer = AutoTokenizer.from_pretrained(args.base, use_fast=True)
     tokenizer.pad_token = tokenizer.eos_token  # ensure pad token set
+    model.config.pad_token_id = tokenizer.pad_token_id
 
-    dataset = get_dataset(args.context_length)
+    dataset = get_dataset(args.context_length, args.datasets_dir)
     data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
 
     training_args = TrainingArguments(
@@ -56,7 +64,7 @@ def main():
         evaluation_strategy="no",
         logging_steps=50,
         save_strategy="epoch",
-        save_total_limit=3,
+        save_total_limit=12,
         report_to=["wandb"],
         dataloader_pin_memory=True,
         dataloader_num_workers=4,

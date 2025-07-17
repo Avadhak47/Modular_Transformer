@@ -2,6 +2,7 @@ from typing import Literal
 
 import torch
 from transformers import AutoModelForCausalLM
+from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding
 
 from .pe import XPOS, SinusoidalPE, AlibiPlusPE
 
@@ -28,16 +29,18 @@ def load_deepseek_with_pe(model_name: str, pe: PE_TYPE = "xpos", rope_scaling: L
 
 
 def _patch_rope_with_xpos(model):
-    for name, module in model.named_modules():
-        if hasattr(module, "rotary_emb"):
-            dim = module.rotary_emb.inv_freq.numel() * 2
-            module.rotary_emb = XPOS(dim)
+    for module in model.modules():
+        if isinstance(module, LlamaRotaryEmbedding):
+            dim = module.dim * 2
+            xpos = XPOS(dim)
 
-            def _apply_rotary(q, k, self_module=module):
-                seq_len = q.size(-2)
-                return self_module.rotary_emb.apply_rotary(q, k, seq_len)
+            def forward(self, seq_len):
+                # Generate cos/sin embeddings then return tuple like HF expects
+                emb = xpos(seq_len, self.inv_freq.device)
+                cos, sin = emb.cos(), emb.sin()
+                return cos.to(self.inv_freq.dtype), sin.to(self.inv_freq.dtype)
 
-            module.apply_rotary = _apply_rotary
+            module.forward = forward.__get__(module, LlamaRotaryEmbedding)
 
 
 def _patch_rope_with_sinusoidal(model):

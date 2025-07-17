@@ -12,19 +12,33 @@ module load python/3.10
 module load enroot/3.4.0
 
 export WANDB_API_KEY=$WANDB_API_KEY
+# Offline caches
 export HF_HOME=/scratch/$USER/huggingface
+export HF_DATASETS_CACHE=/scratch/$USER/huggingface/datasets
+export TRANSFORMERS_OFFLINE=1
+export HF_DATASETS_OFFLINE=1
 
 IMAGE=/scratch/$USER/containers/deepseek_math.sqsh
 pe_list=(xpos sinusoidal "alibi+")
-# pad with repeats to length 5
+# pad to 5 variants
 pe_list+=(xpos sinusoidal)
-PE=${pe_list[$PBS_NODENUM]}
+# Some PBS installs expose per-node index via PBS_VNODENUM
+IDX=${PBS_VNODENUM:-0}
+PE=${pe_list[$IDX]}
 
 CONTAINER=new_math_${PE}_${PBS_JOBID}
 
 enroot list | grep -q $CONTAINER || enroot create --name $CONTAINER $IMAGE
 
-enroot start --root --nv $CONTAINER bash -c "cd /workspace/NewMathLLM && \
-  pip install -r requirements.txt --no-cache-dir && \
-  python train_math_llm.py --pe ${PE} --epochs 1 --batch_size 1 --output /scratch/$USER/new_math_llm/checkpoints && \
+REPO_DIR=/scratch/$USER/NewMathLLM
+
+# Bind project repo and dataset/cache dirs
+enroot start --root --nv \
+  --mount $REPO_DIR:/workspace/NewMathLLM:ro \
+  --mount /scratch/$USER/huggingface:/root/.cache/huggingface \
+  --mount /scratch/$USER/new_math_llm:/workspace/output \
+  $CONTAINER bash -c "cd /workspace/NewMathLLM && \
+  python train_math_llm.py --pe ${PE} --epochs 10 --batch_size 1 \
+    --output /workspace/output/checkpoints \
+    --datasets_dir /workspace/output/datasets && \
   echo Finished ${PE}"
