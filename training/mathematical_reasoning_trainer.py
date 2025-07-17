@@ -75,6 +75,9 @@ class MathematicalReasoningTrainer:
         # Initialize model
         self.logger.info(f"Initializing model with {config['positional_encoding']} positional encoding")
         self.model = TransformerModel(config['model']).to(self.device)
+
+        # Optionally load base model (SOTA) or resume from checkpoint
+        self._maybe_initialize_from_pretrained()
         
         # Initialize data loader
         self.data_loader = MathematicalDatasetLoader(
@@ -428,8 +431,14 @@ class MathematicalReasoningTrainer:
                 current_accuracy = eval_results['summary']['overall_accuracy']
                 if current_accuracy > best_accuracy:
                     best_accuracy = current_accuracy
-                    self.save_model(f"best_model_{self.config['positional_encoding']}.pt")
+                    best_path = self.save_model(f"best_model_{self.config['positional_encoding']}.pt")
                     self.logger.info(f"New best model saved with accuracy: {best_accuracy:.4f}")
+
+                    # Save/overwrite symlink for easy access
+                    best_link = Path(self.config.get('checkpoint_dir', 'checkpoints')) / f"{self.config['positional_encoding']}_best.pt"
+                    if best_link.exists() or best_link.is_symlink():
+                        best_link.unlink()
+                    best_link.symlink_to(best_path.name)
                 
                 evaluation_history.append(eval_results)
         
@@ -442,10 +451,11 @@ class MathematicalReasoningTrainer:
         return evaluation_history
     
     def save_model(self, filename: str):
-        """Save model checkpoint."""
+        """Save model checkpoint and return path string."""
         save_dir = Path(self.config.get('checkpoint_dir', 'checkpoints'))
         save_dir.mkdir(exist_ok=True)
-        
+        full_path = save_dir / filename
+
         torch.save({
             'epoch': self.config['num_epochs'],
             'model_state_dict': self.model.state_dict(),
@@ -453,9 +463,10 @@ class MathematicalReasoningTrainer:
             'scheduler_state_dict': self.scheduler.state_dict(),
             'config': self.config,
             'positional_encoding': self.config['positional_encoding']
-        }, save_dir / filename)
-        
-        self.logger.info(f"Model saved to {save_dir / filename}")
+        }, full_path)
+
+        self.logger.info(f"Model saved to {full_path}")
+        return full_path
     
     def save_evaluation_history(self, history: List[Dict[str, Any]]):
         """Save evaluation results history."""
@@ -467,6 +478,33 @@ class MathematicalReasoningTrainer:
             json.dump(history, f, indent=2, default=str)
         
         self.logger.info(f"Evaluation history saved to {results_dir / filename}")
+
+    def _maybe_initialize_from_pretrained(self):
+        """Load weights either from a provided base model or a previous best checkpoint."""
+        base_path = self.config.get('base_model_path')
+        resume_path = self.config.get('resume_from_checkpoint')
+
+        chosen_path = None
+        if resume_path and Path(resume_path).is_file():
+            chosen_path = resume_path
+            self.logger.info(f"Resuming from checkpoint: {chosen_path}")
+        elif base_path and Path(base_path).is_file():
+            chosen_path = base_path
+            self.logger.info(f"Initializing from base model weights: {chosen_path}")
+
+        if chosen_path:
+            try:
+                ckpt = torch.load(chosen_path, map_location='cpu')
+                # Support both our checkpoint format and raw state_dict
+                state_dict = ckpt.get('model_state_dict', ckpt)
+                missing, unexpected = self.model.load_state_dict(state_dict, strict=False)
+                if missing:
+                    self.logger.warning(f"Missing keys when loading state_dict: {missing[:10]} ...")
+                if unexpected:
+                    self.logger.warning(f"Unexpected keys when loading state_dict: {unexpected[:10]} ...")
+                self.logger.info("Weights loaded successfully (non-strict).")
+            except Exception as e:
+                self.logger.error(f"Failed to load weights from {chosen_path}: {e}")
 
 # Configuration templates for different positional encodings
 def get_mathematical_reasoning_config(pe_type: str = "sinusoidal") -> Dict[str, Any]:

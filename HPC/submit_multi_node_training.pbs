@@ -50,21 +50,10 @@ enroot start --root --rw --nv \
   --mount $OVERLAY_PATH:/overlay:rw \
   $CONTAINER_NAME bash -c "\
     cd /workspace && \
-    python train.py \
-      --base_model WizardMath/WizardMath-7B-V1.0 \
-      --config config.py \
+    python HPC/hpc_train_launcher.py \
       --positional_encoding ${PE_TYPE} \
-      --epochs 6 \
-      --batch_size 4 \
-      --learning_rate 1e-4 \
-      --precision fp16 \
-      --output_dir /scratch/$USER/math_reasoning/checkpoints/${PE_TYPE} \
-      --wandb_run_name ${PE_TYPE}-${PBS_JOBID} && \
-    python evaluate.py \
-      --checkpoint /scratch/$USER/math_reasoning/checkpoints/${PE_TYPE}/best.pt \
-      --datasets gsm8k math \
-      --output_file /scratch/$USER/math_reasoning/results/${PE_TYPE}_metrics.json \
-      --wandb_run_name ${PE_TYPE}-eval-${PBS_JOBID} \
+      --base_model_path /scratch/$USER/math_reasoning/sota_models/WizardMath-7B-V1.0.pt \
+      --experiment_suffix ${PBS_JOBID} \
   "
 
 # 5. (Optional) Post-processing on master node -------------------------------
