@@ -1,0 +1,30 @@
+#!/bin/bash
+#PBS -N new_math_llm
+#PBS -q gpuq
+#PBS -l select=5:ncpus=16:ngpus=1:mem=64gb
+#PBS -l walltime=72:00:00
+#PBS -j oe
+#PBS -o /scratch/$USER/new_math_llm/logs/${PBS_JOBID}.out
+#PBS -e /scratch/$USER/new_math_llm/logs/${PBS_JOBID}.err
+
+module load cuda/11.8
+module load python/3.10
+module load enroot/3.4.0
+
+export WANDB_API_KEY=$WANDB_API_KEY
+export HF_HOME=/scratch/$USER/huggingface
+
+IMAGE=/scratch/$USER/containers/deepseek_math.sqsh
+pe_list=(xpos sinusoidal "alibi+")
+# pad with repeats to length 5
+pe_list+=(xpos sinusoidal)
+PE=${pe_list[$PBS_NODENUM]}
+
+CONTAINER=new_math_${PE}_${PBS_JOBID}
+
+enroot list | grep -q $CONTAINER || enroot create --name $CONTAINER $IMAGE
+
+enroot start --root --nv $CONTAINER bash -c "cd /workspace/NewMathLLM && \
+  pip install -r requirements.txt --no-cache-dir && \
+  python train_math_llm.py --pe ${PE} --epochs 1 --batch_size 1 --output /scratch/$USER/new_math_llm/checkpoints && \
+  echo Finished ${PE}"
