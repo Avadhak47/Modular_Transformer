@@ -1,59 +1,63 @@
 """
-DIET (Decoupled Positional Attention) implementation.
+DIET (Dynamic Iterative Embedding Transformation) Positional Encoding
+
+A learnable positional encoding method that adapts to mathematical reasoning tasks.
 """
+
 import torch
 import torch.nn as nn
-import math
-from .base import BasePositionalEncoding
+from typing import Optional
 
 
-class DIETPositionalEncoding(BasePositionalEncoding):
-    """
-    DIET (Decoupled Positional Attention) positional encoding.
-    Each attention head gets its own positional encoding parameters.
-    """
+class DIETPositionalEncoding(nn.Module):
+    """DIET Positional Encoding for mathematical reasoning."""
     
-    def __init__(self, d_model: int, n_heads: int, max_len: int = 5000, dropout: float = 0.1):
-        super().__init__(d_model, max_len, dropout)
-        self.n_heads = n_heads
-        self.d_head = d_model // n_heads
+    def __init__(
+        self,
+        d_model: int,
+        max_seq_len: int = 32768,
+        compression_ratio: float = 0.25,
+        math_enhanced: bool = True,
+        **kwargs
+    ):
+        super().__init__()
         
-        # Per-head positional embeddings
-        self.head_pos_embeddings = nn.ModuleList([
-            nn.Embedding(max_len, self.d_head) for _ in range(n_heads)
-        ])
+        self.d_model = d_model
+        self.max_seq_len = max_seq_len
+        self.compression_ratio = compression_ratio
+        self.math_enhanced = math_enhanced
         
-        # Initialize embeddings
-        for embedding in self.head_pos_embeddings:
-            nn.init.normal_(embedding.weight, 0, 0.02)
+        # Learnable position embeddings
+        self.position_embeddings = nn.Embedding(max_seq_len, d_model)
+        
+        # Compression layer
+        compressed_dim = int(d_model * compression_ratio)
+        self.compression = nn.Linear(d_model, compressed_dim)
+        self.decompression = nn.Linear(compressed_dim, d_model)
+        
+        # Mathematical enhancement layers
+        if math_enhanced:
+            self.math_transform = nn.Linear(d_model, d_model)
+            self.math_gate = nn.Linear(d_model, d_model)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply DIET positional encoding."""
         batch_size, seq_len, d_model = x.shape
         
-        # Create position indices
-        positions = torch.arange(seq_len, device=x.device).unsqueeze(0).expand(batch_size, -1)
+        # Get position indices
+        positions = torch.arange(seq_len, device=x.device)
         
-        # Reshape input for per-head processing
-        x = x.view(batch_size, seq_len, self.n_heads, self.d_head)
+        # Get position embeddings
+        pos_embeddings = self.position_embeddings(positions)
         
-        # Apply per-head positional encodings
-        for head_idx in range(self.n_heads):
-            head_pos = self.head_pos_embeddings[head_idx](positions)
-            x[:, :, head_idx, :] += head_pos
+        # Compress and decompress for efficiency
+        compressed = self.compression(pos_embeddings)
+        decompressed = self.decompression(compressed)
         
-        # Reshape back to original form
-        x = x.view(batch_size, seq_len, d_model)
+        # Apply mathematical enhancement
+        if self.math_enhanced:
+            enhanced = self.math_transform(decompressed)
+            gate = torch.sigmoid(self.math_gate(x))
+            decompressed = decompressed + gate * enhanced
         
-        return self.dropout(x)
-    
-    def get_encoding_type(self) -> str:
-        return "diet"
-    
-    def get_info(self) -> dict:
-        return {
-            "type": "DIET",
-            "n_heads": self.n_heads,
-            "d_head": self.d_head,
-            "max_len": self.max_len
-        }
+        return x + decompressed
