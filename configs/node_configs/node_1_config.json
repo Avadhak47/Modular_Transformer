@@ -1,0 +1,101 @@
+{
+  "model_config": {
+    "d_model": 4096,
+    "n_heads": 32,
+    "n_encoder_layers": 24,
+    "n_decoder_layers": 24,
+    "d_ff": 11008,
+    "vocab_size": 50000,
+    "max_seq_len": 4096,
+    "dropout": 0.1,
+    "positional_encoding": "rope"
+  },
+  "sota_integration": {
+    "base_model": "internlm/internlm-math-7b",
+    "initialization_strategy": "step_by_step_verification",
+    "use_grpo": false,
+    "use_verification_reward": true,
+    "math_data_ratio": 0.8,
+    "use_lora": true,
+    "lora_rank": 64,
+    "lora_alpha": 16,
+    "lora_dropout": 0.1,
+    "target_modules": ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+    "verification_layers": ["step_verifier", "answer_verifier", "process_verifier"]
+  },
+  "training_config": {
+    "batch_size": 2,
+    "gradient_accumulation_steps": 8,
+    "learning_rate": 2e-5,
+    "warmup_steps": 500,
+    "max_steps": 10000,
+    "weight_decay": 0.01,
+    "optimizer": "adamw",
+    "scheduler": "cosine",
+    "fp16": true,
+    "gradient_checkpointing": true,
+    "dataloader_num_workers": 4,
+    "save_strategy": "steps",
+    "save_steps": 1000,
+    "eval_strategy": "steps", 
+    "eval_steps": 500,
+    "logging_steps": 50,
+    "report_to": "wandb",
+    "max_grad_norm": 1.0,
+    "lr_scheduler_type": "cosine",
+    "optim": "adamw_torch",
+    "remove_unused_columns": false,
+    "group_by_length": true,
+    "verification_loss_weight": 0.3
+  },
+  "data_config": {
+    "train_datasets": ["math", "gsm8k", "internlm_math_verification"],
+    "eval_datasets": ["math_test", "gsm8k_test"],
+    "max_train_samples": 50000,
+    "max_eval_samples": 2000,
+    "preprocessing_num_workers": 8,
+    "train_split": "train",
+    "eval_split": "test",
+    "text_column": "problem",
+    "target_column": "solution",
+    "use_cot_augmentation": true,
+    "verification_augmentation": true,
+    "step_verification_ratio": 0.4
+  },
+  "hardware_config": {
+    "node_id": 1,
+    "gpus_per_node": 4,
+    "cpu_cores": 32,
+    "memory_gb": 128,
+    "distributed_backend": "nccl",
+    "fp16_backend": "auto",
+    "find_unused_parameters": false,
+    "gradient_compression": false
+  },
+  "experiment_config": {
+    "name": "rope_internlm_math_verification",
+    "description": "RoPE positional encoding with InternLM-Math verifiable reasoning",
+    "tags": ["rope", "internlm", "verification", "mathematical_reasoning"],
+    "output_dir": "/scratch/$USER/math_reasoning/experiments/node_1",
+    "logging_dir": "/scratch/$USER/math_reasoning/logs/node_1",
+    "wandb_project": "math_reasoning_multi_node",
+    "wandb_run_name": "node_1_rope_internlm"
+  },
+  "evaluation_config": {
+    "eval_batch_size": 4,
+    "prediction_loss_only": false,
+    "include_inputs_for_metrics": true,
+    "metric_for_best_model": "eval_math_accuracy",
+    "greater_is_better": true,
+    "load_best_model_at_end": true,
+    "verification_metrics": ["step_accuracy", "process_accuracy", "final_accuracy"],
+    "mathematical_reasoning_metrics": ["exact_match", "numerical_accuracy", "reasoning_coherence"]
+  },
+  "rope_config": {
+    "theta": 10000.0,
+    "scaling_factor": 1.0,
+    "max_position_embeddings": 4096,
+    "rope_type": "default",
+    "use_scaled_rope": false
+  }
+}
