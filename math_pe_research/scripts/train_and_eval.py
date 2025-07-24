@@ -35,7 +35,18 @@ def main():
     parser.add_argument('--wandb_entity', type=str, default=None, help="wandb entity (optional)")
     parser.add_argument('--cache_dir', type=str, default=None, help='Directory to cache downloaded models and datasets')
     parser.add_argument('--load_in_4bit', action='store_true', help='Enable 4-bit quantization (requires bitsandbytes, not supported on Kaggle by default)')
+    parser.add_argument('--use_lora', action='store_true', help='Enable LoRA fine-tuning (disabled by default on Kaggle due to compilation issues)')
     args = parser.parse_args()
+
+    # Detect Kaggle environment and adjust defaults
+    is_kaggle = '/kaggle/' in os.getcwd() or 'KAGGLE_KERNEL_RUN_TYPE' in os.environ
+    if is_kaggle:
+        print("🔍 Kaggle environment detected - applying compatibility settings...")
+        # Disable problematic features on Kaggle
+        if not args.use_lora:
+            print("   ✅ LoRA disabled (use --use_lora to force enable)")
+        if args.load_in_4bit:
+            print("   ⚠️  4-bit quantization may cause issues on Kaggle")
 
     # Setup directories
     checkpoint_dir = Path(args.checkpoint_dir)
@@ -62,7 +73,7 @@ def main():
         pe_method=args.pe,
         base_model=args.model_size,
         load_in_4bit=args.load_in_4bit,
-        use_lora=True,
+        use_lora=args.use_lora,
         cache_dir=args.cache_dir
     )
     tokenizer = model.tokenizer
@@ -71,11 +82,23 @@ def main():
     tokenizer.padding_side = "left"  # Important for decoder-only models
     
     # Create data collator for causal language modeling
-    data_collator = DataCollatorForLanguageModeling(
+    base_collator = DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
         mlm=False,  # For causal LM
         pad_to_multiple_of=None
     )
+    
+    # Safety wrapper to filter out non-tensor fields (like metadata strings)
+    def data_collator(features):
+        # Keep only tensor-compatible fields
+        tensor_fields = ['input_ids', 'attention_mask', 'labels']
+        filtered_features = []
+        
+        for feature in features:
+            filtered_feature = {k: v for k, v in feature.items() if k in tensor_fields or isinstance(v, (list, int, float))}
+            filtered_features.append(filtered_feature)
+        
+        return base_collator(filtered_features)
 
     # Data loading
     dataset_names = [d.strip() for d in args.datasets.split(",")]

@@ -687,10 +687,9 @@ Solution: {solution}"""
         # Note: We don't add 'labels' here because DataCollatorForLanguageModeling 
         # will create labels automatically from input_ids and handle padding correctly
         
-        # Add metadata
-        result['problem_type'] = problem_obj.problem_type
-        result['difficulty'] = problem_obj.difficulty
-        result['source'] = problem_obj.source
+        # Store metadata separately (not included in tensor processing)
+        # These fields would cause errors in DataCollatorForLanguageModeling since they're strings
+        # If you need metadata, access it through the dataset's processed_problems list
         
         return result
 
