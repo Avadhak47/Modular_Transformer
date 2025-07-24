@@ -1,0 +1,43 @@
+# Default Configuration for Mathematical Reasoning Experiments
+
+model:
+  base_model: "deepseek-ai/deepseek-math-7b-instruct"
+  pe_method: "rope"
+  max_length: 4096
+  use_lora: true
+  load_in_4bit: false
+  lora_config:
+    r: 16
+    lora_alpha: 32
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+    lora_dropout: 0.1
+
+training:
+  num_epochs: 4
+  max_steps: 1000
+  batch_size: 4
+  learning_rate: 2e-5
+  warmup_steps: 100
+  weight_decay: 0.01
+  gradient_accumulation_steps: 8
+  fp16: true
+  save_steps: 500
+  eval_steps: 250
+  logging_steps: 50
+
+data:
+  datasets: ["gsm8k", "math"]
+  max_samples_per_dataset: 10000
+  train_split: "train"
+  eval_split: "test"
+
+experiment:
+  name: "default_math_reasoning"
+  seed: 42
+  output_dir: "./outputs"
+  cache_dir: "./cache"
+  
+logging:
+  wandb_project: "math_pe_research"
+  wandb_entity: null
+  log_level: "INFO"

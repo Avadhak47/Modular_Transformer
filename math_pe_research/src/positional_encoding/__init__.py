@@ -7,7 +7,7 @@ for mathematical reasoning tasks and long sequence processing.
 
 from .sinusoidal import SinusoidalPositionalEncoding
 from .rope import RotaryPositionalEmbedding
-from .alibi import ALiBiPositionalEncoding
+from .alibi import ALiBiPositionalBias
 from .diet import DIETPositionalEncoding
 from .t5_relative import T5RelativePositionalBias
 from .math_adaptive import MathAdaptivePositionalEncoding
@@ -15,7 +15,7 @@ from .math_adaptive import MathAdaptivePositionalEncoding
 __all__ = [
     'SinusoidalPositionalEncoding',
     'RotaryPositionalEmbedding',
-    'ALiBiPositionalEncoding',
+    'ALiBiPositionalBias',
     'DIETPositionalEncoding',
     'T5RelativePositionalBias',
     'MathAdaptivePositionalEncoding'
@@ -25,7 +25,7 @@ __all__ = [
 PE_REGISTRY = {
     'sinusoidal': SinusoidalPositionalEncoding,
     'rope': RotaryPositionalEmbedding,
-    'alibi': ALiBiPositionalEncoding,
+    'alibi': ALiBiPositionalBias,
     'diet': DIETPositionalEncoding,
     't5_relative': T5RelativePositionalBias,
     'math_adaptive': MathAdaptivePositionalEncoding

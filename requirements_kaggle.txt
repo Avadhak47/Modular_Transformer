@@ -1,0 +1,56 @@
+# Kaggle-Compatible Requirements for Mathematical Reasoning Project
+# Updated for Python 3.13 and improved Kaggle compatibility
+
+# Core ML Framework - Updated versions for Python 3.13 compatibility
+# GPU support for Kaggle T4 x2 accelerators (CUDA 11.8)
+# Use: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# Fallback CPU: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+torch>=2.5.0,<2.8.0
+torchvision>=0.20.0,<0.22.0
+transformers>=4.40.0,<4.50.0
+tokenizers>=0.19.0
+accelerate>=0.28.0
+peft>=0.10.0
+bitsandbytes>=0.43.0
+
+# Mathematical Computing - Python 3.13 compatible
+numpy>=1.26.0,<2.0.0  # Updated for Python 3.13
+sympy>=1.12
+scipy>=1.11.0
+matplotlib>=3.8.0,<3.10.0  # Updated for better compatibility
+pandas>=2.1.0
+
+# Deep Learning Utilities
+einops>=0.8.0
+safetensors>=0.4.0
+
+# Dataset Management
+datasets>=2.18.0
+huggingface-hub>=0.22.0
+
+# Evaluation and Metrics
+scikit-learn>=1.4.0
+seaborn>=0.13.0
+wandb>=0.16.0
+
+# Development and Testing
+pytest>=8.0.0
+black>=24.0.0
+flake8>=7.0.0
+
+# Jupyter and Visualization
+jupyter>=1.0.0
+tqdm>=4.66.0
+
+# Configuration Management
+omegaconf>=2.3.0
+hydra-core>=1.3.0
+
+# Mathematical Tokenization
+tiktoken>=0.6.0
+sentencepiece>=0.2.0
+
+# Additional utilities for Kaggle environment
+psutil>=5.9.0
+packaging>=23.0
+requests>=2.31.0
