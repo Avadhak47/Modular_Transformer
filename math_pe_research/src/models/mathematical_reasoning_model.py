@@ -169,8 +169,6 @@ class MathematicalReasoningModel(nn.Module):
             )
         
         # Load model
-        # Don't pass config to avoid any use_cache constructor issues
-        # The model will load with its default config
         model = AutoModelForCausalLM.from_pretrained(
             self.base_model_name,
             torch_dtype=torch_dtype,
@@ -189,8 +187,10 @@ class MathematicalReasoningModel(nn.Module):
         
         # Resize token embeddings if we added new tokens
         if len(self.tokenizer) > model.config.vocab_size:
+            old_num_tokens = model.config.vocab_size
             model.resize_token_embeddings(len(self.tokenizer))
             logger.info(f"Resized token embeddings to {len(self.tokenizer)}")
+            # Only new rows are randomly initialized; old ones are copied from Pythia
         
         return model
     
@@ -211,6 +211,11 @@ class MathematicalReasoningModel(nn.Module):
             **self.pe_config
         }
         
+        # For RoPE, use head_dim instead of d_model
+        if self.pe_method in ['rope', 'math_adaptive']:
+            head_dim = d_model // num_heads
+            pe_config['dim'] = head_dim  # RoPE expects 'dim' parameter
+        
         # The get_positional_encoding function now handles argument filtering
         new_pe = get_positional_encoding(self.pe_method, **pe_config)
         
@@ -219,26 +224,16 @@ class MathematicalReasoningModel(nn.Module):
         self._replace_llama_positional_encoding(new_pe)
     
     def _replace_llama_positional_encoding(self, new_pe: nn.Module):
-        """Replace positional encoding in Llama-based architecture."""
+        """Replace positional encoding in various transformer architectures."""
         
-        # Check model architecture and handle accordingly
-        if hasattr(self.base_model, 'model') and hasattr(self.base_model.model, 'layers'):
-            # Llama/DeepSeek style models
-            layers = self.base_model.model.layers
-            layer_attr = 'self_attn'
-        elif hasattr(self.base_model, 'transformer') and hasattr(self.base_model.transformer, 'h'):
-            # GPT2 style models
-            layers = self.base_model.transformer.h
-            layer_attr = 'attn'
-        elif hasattr(self.base_model, 'layers'):
-            # Direct layer access
-            layers = self.base_model.layers
-            layer_attr = 'self_attn'
-        else:
+        # Auto-detect model architecture and get layers
+        layers, layer_attr = self._detect_attention_layers()
+        
+        if layers is None:
             logger.warning(f"Unknown model architecture, skipping PE replacement")
             return
         
-        # For Llama/DeepSeek models, we need to modify the attention layers
+        # Modify attention layers across all transformer layers
         for layer_idx, layer in enumerate(layers):
             # Store reference to the attention layer
             attention = getattr(layer, layer_attr, None)
@@ -246,11 +241,16 @@ class MathematicalReasoningModel(nn.Module):
                 logger.warning(f"No attention layer found at layer {layer_idx}")
                 continue
             
+            # Initialize PE parameters properly for this layer
+            if layer_idx == 0:  # Only initialize once, then reuse
+                self._initialize_pe_parameters(new_pe, attention)
+            
             # Create a custom attention wrapper that uses our PE
             custom_attention = CustomAttentionWithPE(
                 attention, 
                 new_pe, 
-                self.pe_method
+                self.pe_method,
+                layer_idx=layer_idx
             )
             
             # Replace the attention layer
@@ -264,16 +264,20 @@ class MathematicalReasoningModel(nn.Module):
         try:
             from peft import LoraConfig, get_peft_model, TaskType
             
+            # Auto-detect target modules based on model architecture
+            target_modules = self._detect_lora_target_modules()
+            
+            if not target_modules:
+                logger.warning("No suitable target modules found for LoRA, skipping LoRA adaptation")
+                return self.base_model
+            
             # Default LoRA configuration optimized for mathematical reasoning
             default_lora_config = {
                 "task_type": TaskType.CAUSAL_LM,
                 "r": 64,  # Rank
                 "lora_alpha": 16,  # Scaling parameter
                 "lora_dropout": 0.1,
-                "target_modules": [
-                    "q_proj", "k_proj", "v_proj", "o_proj",
-                    "gate_proj", "up_proj", "down_proj"
-                ],
+                "target_modules": target_modules,
                 "bias": "none",
                 "inference_mode": False
             }
@@ -311,6 +315,136 @@ class MathematicalReasoningModel(nn.Module):
             self.base_model.config.use_cache = False
         
         logger.info("Applied mathematical reasoning optimizations")
+    
+    def _detect_lora_target_modules(self) -> List[str]:
+        """Auto-detect LoRA target modules based on model architecture."""
+        target_modules = []
+        
+        # Get a sample layer to inspect architecture
+        sample_layer = None
+        
+        # Try different model architectures
+        if hasattr(self.base_model, 'model') and hasattr(self.base_model.model, 'layers'):
+            # Llama/DeepSeek style
+            if len(self.base_model.model.layers) > 0:
+                sample_layer = self.base_model.model.layers[0]
+                arch_type = "llama"
+        elif hasattr(self.base_model, 'transformer') and hasattr(self.base_model.transformer, 'h'):
+            # GPT2/Pythia style
+            if len(self.base_model.transformer.h) > 0:
+                sample_layer = self.base_model.transformer.h[0]
+                arch_type = "gpt"
+        elif hasattr(self.base_model, 'gpt_neox') and hasattr(self.base_model.gpt_neox, 'layers'):
+            # GPT-NeoX/Pythia style
+            if len(self.base_model.gpt_neox.layers) > 0:
+                sample_layer = self.base_model.gpt_neox.layers[0]
+                arch_type = "neox"
+        
+        if sample_layer is None:
+            logger.warning("Could not detect model architecture for LoRA")
+            return []
+        
+        # Inspect the layer to find attention and MLP modules
+        layer_modules = dict(sample_layer.named_modules())
+        
+        # Common patterns for different architectures
+        attention_patterns = [
+            "self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.o_proj",  # Llama
+            "attn.c_attn", "attn.c_proj",  # GPT2
+            "attention.query_key_value", "attention.dense",  # GPT-NeoX
+        ]
+        
+        mlp_patterns = [
+            "mlp.gate_proj", "mlp.up_proj", "mlp.down_proj",  # Llama
+            "mlp.c_fc", "mlp.c_proj",  # GPT2
+            "mlp.dense_h_to_4h", "mlp.dense_4h_to_h",  # GPT-NeoX
+        ]
+        
+        # Find actual module names that exist
+        for pattern in attention_patterns + mlp_patterns:
+            if pattern in layer_modules:
+                # Extract just the module name (last part)
+                module_name = pattern.split('.')[-1]
+                if module_name not in target_modules:
+                    target_modules.append(module_name)
+        
+        # Alternative: scan all linear layers
+        if not target_modules:
+            for name, module in layer_modules.items():
+                if isinstance(module, nn.Linear) and '.' in name:
+                    module_name = name.split('.')[-1]
+                    if module_name not in target_modules and len(module_name) > 1:
+                        target_modules.append(module_name)
+        
+        logger.info(f"Detected LoRA target modules: {target_modules}")
+        return target_modules
+    
+    def _detect_attention_layers(self) -> Tuple[Optional[nn.ModuleList], Optional[str]]:
+        """Detect attention layers in different model architectures."""
+        
+        # Try different model architectures
+        if hasattr(self.base_model, 'model') and hasattr(self.base_model.model, 'layers'):
+            # Llama/DeepSeek style models
+            return self.base_model.model.layers, 'self_attn'
+            
+        elif hasattr(self.base_model, 'transformer') and hasattr(self.base_model.transformer, 'h'):
+            # GPT2/DialoGPT style models
+            return self.base_model.transformer.h, 'attn'
+            
+        elif hasattr(self.base_model, 'gpt_neox') and hasattr(self.base_model.gpt_neox, 'layers'):
+            # GPT-NeoX/Pythia style models
+            return self.base_model.gpt_neox.layers, 'attention'
+            
+        elif hasattr(self.base_model, 'layers'):
+            # Direct layer access
+            return self.base_model.layers, 'self_attn'
+            
+        else:
+            # Try to find any attention-like modules
+            for attr_name in ['layers', 'blocks', 'transformer_layers']:
+                if hasattr(self.base_model, attr_name):
+                    layers = getattr(self.base_model, attr_name)
+                    if hasattr(layers, '__len__') and len(layers) > 0:
+                        # Try to find attention in first layer
+                        first_layer = layers[0]
+                        for attn_name in ['self_attn', 'attn', 'attention', 'mha']:
+                            if hasattr(first_layer, attn_name):
+                                return layers, attn_name
+        
+        return None, None
+    
+    def _initialize_pe_parameters(self, new_pe: nn.Module, original_attention: nn.Module):
+        """Initialize PE parameters with proper parameter mapping and initialization."""
+        
+        # Get model configuration parameters
+        d_model = self.config.hidden_size
+        num_heads = getattr(self.config, 'num_attention_heads', 8)
+        max_seq_len = getattr(self.config, 'max_position_embeddings', 8192)
+        
+        # Initialize PE based on type
+        if hasattr(new_pe, 'initialize_from_config'):
+            # Custom initialization method
+            new_pe.initialize_from_config(
+                d_model=d_model,
+                num_heads=num_heads,
+                max_seq_len=max_seq_len,
+                original_params=dict(original_attention.named_parameters())
+            )
+        elif hasattr(new_pe, 'reset_parameters'):
+            # Standard PyTorch reset
+            new_pe.reset_parameters()
+        else:
+            # Manual initialization for common PE types
+            for name, param in new_pe.named_parameters():
+                if 'weight' in name:
+                    if param.dim() > 1:
+                        nn.init.xavier_uniform_(param)
+                    else:
+                        nn.init.normal_(param, std=0.02)
+                elif 'bias' in name:
+                    nn.init.zeros_(param)
+        
+        logger.info(f"Initialized PE parameters for {type(new_pe).__name__}")
     
     def forward(
         self,
@@ -480,17 +614,53 @@ class CustomAttentionWithPE(nn.Module):
     Wraps the original attention mechanism while applying our PE method.
     """
     
-    def __init__(self, original_attention: nn.Module, pe_layer: nn.Module, pe_method: str):
+    def __init__(self, original_attention: nn.Module, pe_layer: nn.Module, pe_method: str, layer_idx: int = 0):
         super().__init__()
         self.original_attention = original_attention
         self.pe_layer = pe_layer
         self.pe_method = pe_method
+        self.layer_idx = layer_idx
         
         # Copy attributes from original attention
         for attr in ['hidden_size', 'num_heads', 'head_dim', 'config']:
             if hasattr(original_attention, attr):
                 setattr(self, attr, getattr(original_attention, attr))
-    
+        
+        # Auto-detect attention parameters if not already set
+        self._detect_attention_params()
+
+    def _apply_pe(self, hidden_states, query_states=None, key_states=None, position_ids=None, token_ids=None, seq_len=None):
+        """Apply the correct PE logic for each PE type."""
+        # RoPE and math_adaptive: expects [batch, heads, seq_len, head_dim]
+        if self.pe_method in ['rope', 'math_adaptive']:
+            # query_states/key_states: [batch, heads, seq_len, head_dim]
+            # If not already in [batch, heads, seq_len, head_dim], transpose
+            if query_states is not None and key_states is not None:
+                return self.pe_layer(query_states, key_states, seq_len=seq_len)
+            else:
+                raise ValueError("RoPE/m-adaptive PE requires query_states and key_states.")
+        # Sinusoidal, t5_relative, diet: expects [batch, seq_len, hidden_dim] (additive)
+        elif self.pe_method in ['sinusoidal', 't5_relative', 'diet']:
+            # hidden_states: [batch, seq_len, hidden_dim]
+            if hasattr(self.pe_layer, 'forward'):
+                return self.pe_layer(hidden_states, position_ids=position_ids)
+            else:
+                raise ValueError(f"PE {self.pe_method} does not support forward.")
+        # Alibi: expects [batch, heads, seq_len, head_dim] or [batch, seq_len, hidden_dim]
+        elif self.pe_method == 'alibi':
+            # Some Alibi impls expect [batch, heads, seq_len, head_dim], some [batch, seq_len, hidden_dim]
+            if hasattr(self.pe_layer, 'forward'):
+                try:
+                    return self.pe_layer(hidden_states, position_ids=position_ids)
+                except Exception:
+                    # Try with [batch, heads, seq_len, head_dim]
+                    return self.pe_layer(hidden_states)
+            else:
+                raise ValueError("Alibi PE does not support forward.")
+        else:
+            # Default: pass through
+            return hidden_states
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -501,66 +671,52 @@ class CustomAttentionWithPE(nn.Module):
         use_cache: bool = False,
         **kwargs
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-        
-        # Apply positional encoding based on method
+        # For RoPE-like methods, we apply PE within attention computation
         if self.pe_method in ['rope', 'math_adaptive']:
-            # For RoPE-like methods, we apply PE within attention computation
-            return self._forward_with_rope_like_pe(
-                hidden_states, attention_mask, position_ids, 
-                past_key_value, output_attentions, use_cache, **kwargs
+            batch_size, seq_len, _ = hidden_states.shape
+            # Project to Q, K, V
+            if hasattr(self.original_attention, 'q_proj'):
+                query_states = self.original_attention.q_proj(hidden_states)
+                key_states = self.original_attention.k_proj(hidden_states)
+                value_states = self.original_attention.v_proj(hidden_states)
+            elif hasattr(self.original_attention, 'query_key_value'):
+                qkv = self.original_attention.query_key_value(hidden_states)
+                num_heads = getattr(self.original_attention, 'num_attention_heads', 8)
+                head_dim = getattr(self.original_attention, 'head_size', 64)
+                qkv = qkv.view(batch_size, seq_len, 3, num_heads, head_dim)
+                query_states, key_states, value_states = qkv.unbind(2)
+            elif hasattr(self.original_attention, 'c_attn'):
+                qkv = self.original_attention.c_attn(hidden_states)
+                num_heads = self.num_heads
+                head_dim = self.head_dim
+                qkv = qkv.view(batch_size, seq_len, 3, num_heads, head_dim)
+                query_states, key_states, value_states = qkv.unbind(2)
+            else:
+                logger.warning("Unknown attention architecture, using original attention")
+                return self.original_attention(
+                    hidden_states, attention_mask, position_ids,
+                    past_key_value, output_attentions, use_cache, **kwargs
+                )
+            # Transpose to [batch, heads, seq_len, head_dim]
+            query_states = query_states.transpose(1, 2)
+            key_states = key_states.transpose(1, 2)
+            value_states = value_states.transpose(1, 2)
+            # Apply PE
+            query_states, key_states = self._apply_pe(
+                None, query_states=query_states, key_states=key_states, seq_len=seq_len
+            )
+            # Continue with standard attention computation
+            return self._compute_attention(
+                query_states, key_states, value_states, attention_mask,
+                past_key_value, output_attentions, use_cache
             )
         else:
-            # For other methods, apply PE to hidden states before attention
-            return self._forward_with_additive_pe(
+            # For additive PE, apply to hidden_states before attention
+            hidden_states = self._apply_pe(hidden_states, position_ids=position_ids)
+            return self.original_attention(
                 hidden_states, attention_mask, position_ids,
                 past_key_value, output_attentions, use_cache, **kwargs
             )
-    
-    def _forward_with_rope_like_pe(self, hidden_states, attention_mask, position_ids, 
-                                  past_key_value, output_attentions, use_cache, **kwargs):
-        """Forward pass for RoPE-like positional encodings."""
-        
-        # Get query, key, value projections
-        batch_size, seq_len, _ = hidden_states.shape
-        
-        # Project to Q, K, V
-        query_states = self.original_attention.q_proj(hidden_states)
-        key_states = self.original_attention.k_proj(hidden_states)
-        value_states = self.original_attention.v_proj(hidden_states)
-        
-        # Reshape for multi-head attention
-        query_states = query_states.view(batch_size, seq_len, self.num_heads, self.head_dim)
-        key_states = key_states.view(batch_size, seq_len, self.num_heads, self.head_dim)
-        value_states = value_states.view(batch_size, seq_len, self.num_heads, self.head_dim)
-        
-        # Apply positional encoding
-        if hasattr(self.pe_layer, 'forward'):
-            # Extract token IDs if available (for mathematical adaptive PE)
-            token_ids = kwargs.get('input_ids', None)
-            
-            query_states = self.pe_layer(query_states, token_ids=token_ids)
-            key_states = self.pe_layer(key_states, token_ids=token_ids)
-        
-        # Continue with standard attention computation
-        return self._compute_attention(
-            query_states, key_states, value_states, attention_mask,
-            past_key_value, output_attentions, use_cache
-        )
-    
-    def _forward_with_additive_pe(self, hidden_states, attention_mask, position_ids,
-                                 past_key_value, output_attentions, use_cache, **kwargs):
-        """Forward pass for additive positional encodings."""
-        
-        # Apply positional encoding to hidden states
-        if hasattr(self.pe_layer, 'forward'):
-            token_ids = kwargs.get('input_ids', None)
-            hidden_states = self.pe_layer(hidden_states, token_ids=token_ids, position_ids=position_ids)
-        
-        # Use original attention with modified hidden states
-        return self.original_attention(
-            hidden_states, attention_mask, position_ids,
-            past_key_value, output_attentions, use_cache, **kwargs
-        )
     
     def _compute_attention(self, query_states, key_states, value_states, attention_mask,
                           past_key_value, output_attentions, use_cache):
@@ -573,11 +729,14 @@ class CustomAttentionWithPE(nn.Module):
         key_states = key_states.transpose(1, 2)
         value_states = value_states.transpose(1, 2)
         
-        # Compute attention scores
+        # Compute attention scores (tensors are already in [batch, heads, seq_len, head_dim])
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(head_dim)
         
         # Apply attention mask
         if attention_mask is not None:
+            # Reshape attention mask to match attention weights
+            if attention_mask.dim() == 2:
+                attention_mask = attention_mask.unsqueeze(1).unsqueeze(1)  # [batch, 1, 1, seq_len]
             attn_weights = attn_weights + attention_mask
         
         # Apply softmax
@@ -587,9 +746,21 @@ class CustomAttentionWithPE(nn.Module):
         attn_output = torch.matmul(attn_weights, value_states)
         
         # Reshape and project output
-        attn_output = attn_output.transpose(1, 2).contiguous()
-        attn_output = attn_output.reshape(batch_size, seq_len, -1)
-        attn_output = self.original_attention.o_proj(attn_output)
+        attn_output = attn_output.transpose(1, 2).contiguous()  # [batch, seq_len, heads, head_dim]
+        attn_output = attn_output.reshape(batch_size, seq_len, num_heads * head_dim)  # [batch, seq_len, hidden_size]
+        
+        # Handle different output projection architectures
+        if hasattr(self.original_attention, 'o_proj'):
+            # Llama-style: o_proj
+            attn_output = self.original_attention.o_proj(attn_output)
+        elif hasattr(self.original_attention, 'dense'):
+            # GPT-NeoX/GPT2 style: dense
+            attn_output = self.original_attention.dense(attn_output)
+        elif hasattr(self.original_attention, 'c_proj'):
+            # GPT2 style: c_proj
+            attn_output = self.original_attention.c_proj(attn_output)
+        else:
+            logger.warning("Unknown output projection, skipping")
         
         outputs = (attn_output,)
         if output_attentions:
