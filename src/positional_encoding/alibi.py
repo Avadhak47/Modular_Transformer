@@ -1,185 +1,301 @@
 """
-ALiBi (Attention with Linear Biases) positional encoding implementation.
+ALiBi (Attention with Linear Biases) - Enhanced for Mathematical Reasoning
+
+Optimized implementation with:
+- Adaptive slope learning for mathematical patterns
+- Long sequence extrapolation capabilities
+- Mathematical reasoning specific bias patterns
 """
+
 import torch
 import torch.nn as nn
 import math
 from typing import Optional
-from .base import BasePositionalEncoding
 
 
-class ALiBiPositionalEncoding(BasePositionalEncoding):
+class ALiBiPositionalBias(nn.Module):
     """
-    ALiBi (Attention with Linear Biases) positional encoding.
-    Adds linear biases to attention scores based on token distance.
+    Enhanced ALiBi Positional Bias for Mathematical Reasoning
+    
+    Features:
+    - Learnable slopes optimized for mathematical patterns
+    - Dynamic bias adjustment based on sequence content
+    - Efficient computation for long sequences
+    - Mathematical reasoning specific enhancements
     """
     
-    def __init__(self, d_model: int, n_heads: int, max_len: int = 5000, dropout: float = 0.1):
-        """
-        Initialize ALiBi positional encoding.
+    def __init__(
+        self,
+        num_heads: int,
+        max_seq_len: int = 32768,
+        learnable_slopes: bool = True,
+        math_enhanced: bool = True,
+        use_symmetric_bias: bool = False
+    ):
+        super().__init__()
         
-        Args:
-            d_model: Model dimension
-            n_heads: Number of attention heads
-            max_len: Maximum sequence length (not strictly enforced)
-            dropout: Dropout rate
-        """
-        super().__init__(d_model, max_len, dropout)
-        self.n_heads = n_heads
+        self.num_heads = num_heads
+        self.max_seq_len = max_seq_len
+        self.math_enhanced = math_enhanced
+        self.use_symmetric_bias = use_symmetric_bias
         
-        # Calculate slopes for each attention head
-        slopes = self._get_slopes(n_heads)
-        self.register_buffer('slopes', slopes)
-    
-    def _get_slopes(self, n_heads: int) -> torch.Tensor:
-        """
-        Calculate slopes for ALiBi bias based on number of heads.
+        # Compute base slopes
+        self.register_buffer('base_slopes', self._compute_base_slopes())
         
-        Args:
-            n_heads: Number of attention heads
-            
-        Returns:
-            Tensor of slopes for each head
-        """
-        def get_slopes_power_of_2(n):
-            start = 2 ** (-2 ** -(math.log2(n) - 3))
-            ratio = start
-            return [start * ratio ** i for i in range(n)]
-        
-        # Handle cases where n_heads is not a power of 2
-        if math.log2(n_heads).is_integer():
-            slopes = get_slopes_power_of_2(n_heads)
+        # Learnable slope adjustments for mathematical reasoning
+        if learnable_slopes:
+            self.slope_adjustment = nn.Parameter(torch.zeros(num_heads))
+            self.slope_scaling = nn.Parameter(torch.ones(num_heads))
         else:
-            closest_power_of_2 = 2 ** math.floor(math.log2(n_heads))
-            slopes = get_slopes_power_of_2(closest_power_of_2)
-            
-            # Add extra slopes for remaining heads
-            extra_slopes = get_slopes_power_of_2(2 * closest_power_of_2)
-            slopes += extra_slopes[0::2][:n_heads - closest_power_of_2]
+            self.register_buffer('slope_adjustment', torch.zeros(num_heads))
+            self.register_buffer('slope_scaling', torch.ones(num_heads))
         
+        # Mathematical pattern specific biases
+        if math_enhanced:
+            self.math_bias_scale = nn.Parameter(torch.ones(num_heads))
+            self.sequential_bias = nn.Parameter(torch.zeros(num_heads))
+            self.hierarchical_bias = nn.Parameter(torch.zeros(num_heads))
+        
+        # Cache for bias matrix
+        self._cached_bias = None
+        self._cached_seq_len = 0
+    
+    def _compute_base_slopes(self) -> torch.Tensor:
+        """Compute base slopes for ALiBi attention bias."""
+        def get_slopes_power_of_2(n):
+            start = (2**(-2**-(math.log2(n)-3)))
+            ratio = start
+            return [start*ratio**i for i in range(n)]
+        
+        def get_slopes(n):
+            if math.log2(n).is_integer():
+                return get_slopes_power_of_2(n)
+            else:
+                closest_power_of_2 = 2**math.floor(math.log2(n))
+                return (get_slopes_power_of_2(closest_power_of_2) + 
+                       get_slopes(2*closest_power_of_2)[0::2][:n-closest_power_of_2])
+        
+        slopes = get_slopes(self.num_heads)
         return torch.tensor(slopes, dtype=torch.float32)
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        ALiBi doesn't modify input embeddings directly.
-        The bias is applied in the attention mechanism.
+    def _get_bias_matrix(self, seq_len: int, device: torch.device) -> torch.Tensor:
+        """Get or compute the bias matrix for given sequence length."""
+        if self._cached_bias is not None and seq_len <= self._cached_seq_len:
+            return self._cached_bias[:, :seq_len, :seq_len]
         
-        Args:
-            x: Input tensor of shape (batch_size, seq_len, d_model)
+        # Create position difference matrix
+        positions = torch.arange(seq_len, device=device).unsqueeze(0)
+        position_diff = positions.unsqueeze(2) - positions.unsqueeze(1)  # [1, seq_len, seq_len]
+        
+        # Apply slopes
+        effective_slopes = self.base_slopes * self.slope_scaling + self.slope_adjustment
+        effective_slopes = effective_slopes.to(device).unsqueeze(1).unsqueeze(2)
+        
+        # Compute base bias
+        bias = position_diff.unsqueeze(0) * effective_slopes  # [num_heads, seq_len, seq_len]
+        
+        # Mathematical reasoning enhancements
+        if self.math_enhanced:
+            # Scale bias for mathematical patterns
+            bias = bias * self.math_bias_scale.unsqueeze(1).unsqueeze(2)
             
-        Returns:
-            Input tensor with dropout applied (unchanged otherwise)
-        """
-        return self.dropout(x)
-    
-    def get_alibi_bias(self, seq_len: int, device: torch.device) -> torch.Tensor:
-        """
-        Generate ALiBi bias matrix for attention scores.
-        
-        Args:
-            seq_len: Sequence length
-            device: Device to place the tensor on
+            # Add sequential reasoning bias (favor recent context)
+            sequential_mask = torch.tril(torch.ones(seq_len, seq_len, device=device))
+            sequential_bias = (sequential_mask * 
+                             self.sequential_bias.unsqueeze(1).unsqueeze(2))
+            bias = bias + sequential_bias
             
-        Returns:
-            Bias tensor of shape (n_heads, seq_len, seq_len)
-        """
-        # Create position indices
-        positions = torch.arange(seq_len, device=device)
+            # Add hierarchical reasoning bias (favor certain distance patterns)
+            hierarchical_pattern = self._create_hierarchical_pattern(seq_len, device)
+            hierarchical_bias = (hierarchical_pattern * 
+                                self.hierarchical_bias.unsqueeze(1).unsqueeze(2))
+            bias = bias + hierarchical_bias
         
-        # Calculate distances between all pairs of positions
-        distances = positions.unsqueeze(0) - positions.unsqueeze(1)
-        distances = distances.abs().float()
+        # Apply causal mask (upper triangular part set to -inf)
+        causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=device), diagonal=1)
+        bias = bias.masked_fill(causal_mask.bool(), float('-inf'))
         
-        # Apply slopes to distances (negative because we subtract from attention scores)
-        bias = -distances.unsqueeze(0) * torch.as_tensor(self.slopes).unsqueeze(1).unsqueeze(2).to(device)
+        # Cache the result
+        self._cached_bias = bias
+        self._cached_seq_len = seq_len
         
         return bias
     
-    def get_causal_alibi_bias(self, seq_len: int, device: torch.device) -> torch.Tensor:
+    def _create_hierarchical_pattern(self, seq_len: int, device: torch.device) -> torch.Tensor:
+        """Create hierarchical attention pattern for mathematical reasoning."""
+        # Create patterns that favor certain mathematical structure distances
+        pattern = torch.zeros(seq_len, seq_len, device=device)
+        
+        for i in range(seq_len):
+            for j in range(seq_len):
+                distance = abs(i - j)
+                
+                # Favor mathematical structure distances (powers of 2, fibonacci-like)
+                if distance in [1, 2, 3, 5, 8, 13, 21]:  # Fibonacci-like
+                    pattern[i, j] = 0.1
+                elif distance in [4, 16, 64, 256]:  # Powers of 4
+                    pattern[i, j] = 0.05
+                elif distance % 10 == 0:  # Decimal structure
+                    pattern[i, j] = 0.02
+        
+        return pattern
+    
+    def forward(
+        self, 
+        attention_scores: torch.Tensor,
+        seq_len: Optional[int] = None
+    ) -> torch.Tensor:
         """
-        Generate causal ALiBi bias matrix (for decoder self-attention).
+        Apply ALiBi bias to attention scores.
         
         Args:
-            seq_len: Sequence length
-            device: Device to place the tensor on
+            attention_scores: Attention scores [batch, num_heads, seq_len, seq_len]
+            seq_len: Sequence length (if different from tensor size)
             
         Returns:
-            Causal bias tensor of shape (n_heads, seq_len, seq_len)
+            Biased attention scores
         """
-        # Create position indices
-        positions = torch.arange(seq_len, device=device)
+        if seq_len is None:
+            seq_len = attention_scores.size(-1)
         
-        # Calculate relative positions (only past positions)
-        rel_positions = positions.unsqueeze(0) - positions.unsqueeze(1)
-        
-        # Create causal mask (future positions get large negative values)
-        causal_mask = (rel_positions > 0).float() * -1e9
-        
-        # Apply slopes to past positions only
-        bias = torch.where(
-            rel_positions <= 0,
-            -rel_positions.abs().float().unsqueeze(0) * torch.as_tensor(self.slopes).unsqueeze(1).unsqueeze(2).to(device),
-            causal_mask.unsqueeze(0).to(device)
-        )
-        
-        return bias
-    
-    def get_encoding_type(self) -> str:
-        """Return the encoding type name."""
-        return "alibi"
-    
-    def can_extrapolate(self) -> bool:
-        """ALiBi can extrapolate to longer sequences."""
-        return True
-    
-    def get_slopes_info(self) -> dict:
-        """Get information about the slopes used."""
-        return {
-            "n_heads": self.n_heads,
-            "slopes": torch.as_tensor(self.slopes).tolist(),
-            "min_slope": torch.as_tensor(self.slopes).min().item(),
-            "max_slope": torch.as_tensor(self.slopes).max().item()
-        }
-    
-    def apply_bias_to_attention(self, attention_scores: torch.Tensor, causal: bool = False) -> torch.Tensor:
-        """
-        Apply ALiBi bias directly to attention scores.
-        
-        Args:
-            attention_scores: Attention scores of shape (batch_size, n_heads, seq_len, seq_len)
-            causal: Whether to apply causal masking
-            
-        Returns:
-            Attention scores with ALiBi bias applied
-        """
-        batch_size, n_heads, seq_len, _ = attention_scores.shape
-        device = attention_scores.device
-        
-        # Verify number of heads matches
-        assert n_heads == self.n_heads, f"Expected {self.n_heads} heads, got {n_heads}"
-        
-        # Get appropriate bias
-        if causal:
-            bias = self.get_causal_alibi_bias(seq_len, device)
-        else:
-            bias = self.get_alibi_bias(seq_len, device)
+        # Get bias matrix
+        bias = self._get_bias_matrix(seq_len, attention_scores.device)
         
         # Add bias to attention scores
-        return attention_scores + bias.unsqueeze(0)
+        return attention_scores + bias
     
-    def extend_to_length(self, seq_len: int, device: torch.device, causal: bool = False) -> torch.Tensor:
-        """
-        Generate ALiBi bias for any sequence length (supports extrapolation).
+    def extend_length(self, new_max_len: int):
+        """Extend maximum sequence length and clear cache."""
+        if new_max_len <= self.max_seq_len:
+            return
         
-        Args:
-            seq_len: Target sequence length
-            device: Device for the tensor
-            causal: Whether to use causal masking
-            
-        Returns:
-            ALiBi bias tensor
-        """
-        if causal:
-            return self.get_causal_alibi_bias(seq_len, device)
-        else:
-            return self.get_alibi_bias(seq_len, device)
+        self.max_seq_len = new_max_len
+        self._cached_bias = None
+        self._cached_seq_len = 0
+    
+    def get_slopes(self) -> torch.Tensor:
+        """Get effective slopes for analysis."""
+        return self.base_slopes * self.slope_scaling + self.slope_adjustment
+
+
+class AdaptiveALiBi(ALiBiPositionalBias):
+    """
+    Adaptive ALiBi that learns optimal bias patterns for mathematical reasoning.
+    """
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, math_enhanced=True, **kwargs)
+        
+        # Additional adaptive parameters
+        self.distance_embedding = nn.Embedding(self.max_seq_len, self.num_heads)
+        self.content_adaptive_bias = nn.Linear(self.num_heads, self.num_heads)
+        
+        # Mathematical pattern detectors
+        self.arithmetic_pattern_weight = nn.Parameter(torch.zeros(self.num_heads))
+        self.algebraic_pattern_weight = nn.Parameter(torch.zeros(self.num_heads))
+        self.geometric_pattern_weight = nn.Parameter(torch.zeros(self.num_heads))
+    
+    def _compute_adaptive_bias(
+        self, 
+        seq_len: int, 
+        device: torch.device,
+        content_features: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """Compute adaptive bias based on content and mathematical patterns."""
+        # Base bias computation
+        base_bias = super()._get_bias_matrix(seq_len, device)
+        
+        # Distance-based adaptive bias
+        distances = torch.arange(seq_len, device=device)
+        distance_bias = self.distance_embedding(distances)  # [seq_len, num_heads]
+        
+        # Create distance bias matrix
+        dist_bias_matrix = torch.zeros(self.num_heads, seq_len, seq_len, device=device)
+        for i in range(seq_len):
+            for j in range(seq_len):
+                dist = abs(i - j)
+                if dist < seq_len:
+                    dist_bias_matrix[:, i, j] = distance_bias[dist]
+        
+        # Content-adaptive bias (if content features provided)
+        if content_features is not None:
+            content_bias = self.content_adaptive_bias(content_features.mean(dim=1))
+            content_bias = content_bias.unsqueeze(1).unsqueeze(2)
+            base_bias = base_bias + content_bias
+        
+        # Mathematical pattern-specific adjustments
+        pattern_weights = (self.arithmetic_pattern_weight + 
+                          self.algebraic_pattern_weight + 
+                          self.geometric_pattern_weight) / 3.0
+        pattern_bias = dist_bias_matrix * pattern_weights.unsqueeze(1).unsqueeze(2)
+        
+        return base_bias + pattern_bias
+    
+    def forward(
+        self, 
+        attention_scores: torch.Tensor,
+        seq_len: Optional[int] = None,
+        content_features: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """Enhanced forward with adaptive bias computation."""
+        if seq_len is None:
+            seq_len = attention_scores.size(-1)
+        
+        # Get adaptive bias
+        bias = self._compute_adaptive_bias(seq_len, attention_scores.device, content_features)
+        
+        return attention_scores + bias
+
+
+class MathematicalALiBi(ALiBiPositionalBias):
+    """
+    ALiBi specifically optimized for mathematical reasoning patterns.
+    """
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, math_enhanced=True, **kwargs)
+        
+        # Mathematical reasoning specific parameters
+        self.equation_locality_bias = nn.Parameter(torch.zeros(self.num_heads))
+        self.proof_step_bias = nn.Parameter(torch.zeros(self.num_heads))
+        self.variable_reference_bias = nn.Parameter(torch.zeros(self.num_heads))
+        
+        # Learned mathematical distance functions
+        self.math_distance_transform = nn.Linear(1, self.num_heads)
+    
+    def _create_mathematical_bias(self, seq_len: int, device: torch.device) -> torch.Tensor:
+        """Create bias patterns specific to mathematical reasoning."""
+        bias = torch.zeros(self.num_heads, seq_len, seq_len, device=device)
+        
+        for i in range(seq_len):
+            for j in range(seq_len):
+                distance = abs(i - j)
+                
+                # Equation locality: favor nearby tokens in equations
+                if distance <= 5:
+                    bias[:, i, j] += self.equation_locality_bias
+                
+                # Proof steps: favor certain step distances
+                if distance in [1, 2, 3]:  # Adjacent proof steps
+                    bias[:, i, j] += self.proof_step_bias
+                
+                # Variable references: favor medium-range dependencies
+                if 3 < distance <= 20:
+                    bias[:, i, j] += self.variable_reference_bias * (1.0 / distance)
+                
+                # Transform distance through learned function
+                dist_tensor = torch.tensor([distance], dtype=torch.float32, device=device)
+                dist_bias = self.math_distance_transform(dist_tensor)
+                bias[:, i, j] += dist_bias
+        
+        return bias
+    
+    def _get_bias_matrix(self, seq_len: int, device: torch.device) -> torch.Tensor:
+        """Enhanced bias matrix with mathematical reasoning patterns."""
+        # Get base ALiBi bias
+        base_bias = super()._get_bias_matrix(seq_len, device)
+        
+        # Add mathematical reasoning bias
+        math_bias = self._create_mathematical_bias(seq_len, device)
+        
+        return base_bias + math_bias

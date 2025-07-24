@@ -6,8 +6,8 @@ for mathematical reasoning tasks and long sequence processing.
 """
 
 from .sinusoidal import SinusoidalPositionalEncoding
-from .rope import RotaryPositionalEmbedding
-from .alibi import ALiBiPositionalBias
+from .rope import RoPEPositionalEncoding
+from .alibi import ALiBiPositionalEncoding
 from .diet import DIETPositionalEncoding
 from .t5_relative import T5RelativePositionalBias
 
@@ -22,10 +22,11 @@ __all__ = [
 # PE Method Registry for easy access
 PE_REGISTRY = {
     'sinusoidal': SinusoidalPositionalEncoding,
-    'rope': RotaryPositionalEmbedding,
-    'alibi': ALiBiPositionalBias,
+    'rope': RoPEPositionalEncoding,
+    'alibi': ALiBiPositionalEncoding,
     'diet': DIETPositionalEncoding,
-    't5_relative': T5RelativePositionalBias
+    't5_relative': T5RelativePositionalBias,
+    'math_adaptive': MathAdaptivePositionalEncoding
 }
 
 def get_positional_encoding(pe_type: str, **kwargs):
