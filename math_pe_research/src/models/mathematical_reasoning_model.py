@@ -685,10 +685,17 @@ class CustomAttentionWithPE(nn.Module):
             else:
                 # Fallback: try to infer from weight shapes
                 for name, param in self.original_attention.named_parameters():
-                    if 'query' in name or 'q_proj' in name or 'query_key_value' in name:
-                        # Assume hidden_size = num_heads * head_dim
+                    if 'query_key_value' in name:
+                        # For GPT-NeoX: query_key_value weight shape is [hidden_size, 3 * hidden_size]
+                        # So hidden_size = weight.shape[0]
+                        self.hidden_size = param.shape[0]
+                        # GPT-NeoX typically uses head_dim = 64
+                        self.num_heads = self.hidden_size // 64
+                        break
+                    elif 'query' in name or 'q_proj' in name:
+                        # For other architectures
                         if hasattr(self, 'hidden_size'):
-                            self.num_heads = getattr(self, 'hidden_size', 768) // 64  # Assume head_dim=64
+                            self.num_heads = self.hidden_size // 64  # Assume head_dim=64
                         else:
                             self.num_heads = 12  # Default fallback
                         break
@@ -702,7 +709,13 @@ class CustomAttentionWithPE(nn.Module):
                     self.hidden_size = getattr(self.original_attention, attr)
                     break
             else:
-                self.hidden_size = self.num_heads * 64  # Default: head_dim=64
+                # Try to infer from query_key_value weight
+                for name, param in self.original_attention.named_parameters():
+                    if 'query_key_value' in name:
+                        self.hidden_size = param.shape[0]
+                        break
+                else:
+                    self.hidden_size = self.num_heads * 64  # Default: head_dim=64
         
         # Calculate head_dim
         if not hasattr(self, 'head_dim'):
@@ -762,6 +775,10 @@ class CustomAttentionWithPE(nn.Module):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         # For RoPE-like methods, we apply PE within attention computation
         if self.pe_method in ['rope', 'math_adaptive']:
+            # Ensure attention parameters are detected
+            if not hasattr(self, 'num_heads') or not hasattr(self, 'head_dim'):
+                self._detect_attention_params()
+            
             batch_size, seq_len, _ = hidden_states.shape
             # Project to Q, K, V
             if hasattr(self.original_attention, 'q_proj'):
@@ -770,16 +787,80 @@ class CustomAttentionWithPE(nn.Module):
                 value_states = self.original_attention.v_proj(hidden_states)
             elif hasattr(self.original_attention, 'query_key_value'):
                 qkv = self.original_attention.query_key_value(hidden_states)
-                num_heads = getattr(self.original_attention, 'num_attention_heads', 8)
-                head_dim = getattr(self.original_attention, 'head_size', 64)
+                # Get the actual model configuration from the original attention module
+                num_heads = getattr(self.original_attention, 'num_attention_heads', None)
+                if num_heads is None:
+                    # Try to get from the model config
+                    if hasattr(self.original_attention, 'config'):
+                        num_heads = getattr(self.original_attention.config, 'num_attention_heads', None)
+                
+                if num_heads is None:
+                    # Last resort: calculate from hidden_size
+                    hidden_size = getattr(self.original_attention, 'hidden_size', None)
+                    if hidden_size is None and hasattr(self.original_attention, 'config'):
+                        hidden_size = getattr(self.original_attention.config, 'hidden_size', None)
+                    
+                    if hidden_size is not None:
+                        # GPT-NeoX typically uses head_dim = 64
+                        head_dim = 64
+                        num_heads = hidden_size // head_dim
+                    else:
+                        # Ultimate fallback
+                        num_heads = 40  # Common for Pythia models
+                        head_dim = 64
+                else:
+                    # Calculate head_dim from hidden_size and num_heads
+                    hidden_size = getattr(self.original_attention, 'hidden_size', None)
+                    if hidden_size is None and hasattr(self.original_attention, 'config'):
+                        hidden_size = getattr(self.original_attention.config, 'hidden_size', None)
+                    
+                    if hidden_size is not None:
+                        head_dim = hidden_size // num_heads
+                    else:
+                        head_dim = 64  # Default
+                
+                logger.debug(f"GPT-NeoX: num_heads={num_heads}, head_dim={head_dim}, qkv_shape={qkv.shape}")
                 qkv = qkv.view(batch_size, seq_len, 3, num_heads, head_dim)
                 query_states, key_states, value_states = qkv.unbind(2)
+                logger.debug(f"GPT-NeoX QKV reshape: {qkv.shape} -> Q:{query_states.shape}, K:{key_states.shape}, V:{value_states.shape}")
             elif hasattr(self.original_attention, 'c_attn'):
                 qkv = self.original_attention.c_attn(hidden_states)
-                num_heads = self.num_heads
-                head_dim = self.head_dim
+                # Get the actual model configuration from the original attention module
+                num_heads = getattr(self.original_attention, 'num_attention_heads', None)
+                if num_heads is None:
+                    # Try to get from the model config
+                    if hasattr(self.original_attention, 'config'):
+                        num_heads = getattr(self.original_attention.config, 'num_attention_heads', None)
+                
+                if num_heads is None:
+                    # Last resort: calculate from hidden_size
+                    hidden_size = getattr(self.original_attention, 'hidden_size', None)
+                    if hidden_size is None and hasattr(self.original_attention, 'config'):
+                        hidden_size = getattr(self.original_attention.config, 'hidden_size', None)
+                    
+                    if hidden_size is not None:
+                        # GPT2 typically uses head_dim = 64
+                        head_dim = 64
+                        num_heads = hidden_size // head_dim
+                    else:
+                        # Ultimate fallback
+                        num_heads = 12  # Common for GPT2 models
+                        head_dim = 64
+                else:
+                    # Calculate head_dim from hidden_size and num_heads
+                    hidden_size = getattr(self.original_attention, 'hidden_size', None)
+                    if hidden_size is None and hasattr(self.original_attention, 'config'):
+                        hidden_size = getattr(self.original_attention.config, 'hidden_size', None)
+                    
+                    if hidden_size is not None:
+                        head_dim = hidden_size // num_heads
+                    else:
+                        head_dim = 64  # Default
+                
+                logger.debug(f"GPT2: num_heads={num_heads}, head_dim={head_dim}, qkv_shape={qkv.shape}")
                 qkv = qkv.view(batch_size, seq_len, 3, num_heads, head_dim)
                 query_states, key_states, value_states = qkv.unbind(2)
+                logger.debug(f"GPT2 QKV reshape: {qkv.shape} -> Q:{query_states.shape}, K:{key_states.shape}, V:{value_states.shape}")
             else:
                 logger.warning("Unknown attention architecture, using original attention")
                 return self.original_attention(

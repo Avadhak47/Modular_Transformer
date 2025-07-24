@@ -56,7 +56,19 @@ class DIETPositionalEncoding(nn.Module):
         if position_ids is not None:
             pe = self.pe.squeeze(0)[position_ids]
         else:
-            pe = self.pe[:, :seq_len, :]
+            # Handle sequences longer than max_seq_len
+            if seq_len > self.max_seq_len:
+                # Generate positional encoding on-the-fly for longer sequences
+                positions = torch.arange(seq_len, device=x.device, dtype=torch.float).unsqueeze(1)
+                div_term = torch.exp(
+                    torch.arange(0, d_model, 2, device=x.device).float() * -(math.log(10000.0) / d_model)
+                )
+                pe = torch.zeros(seq_len, d_model, device=x.device)
+                pe[:, 0::2] = torch.sin(positions * div_term)
+                pe[:, 1::2] = torch.cos(positions * div_term)
+                pe = pe.unsqueeze(0)  # Add batch dimension
+            else:
+                pe = self.pe[:, :seq_len, :]
         
         # Apply dynamic transformation
         pe_dynamic = self.position_transform(pe)

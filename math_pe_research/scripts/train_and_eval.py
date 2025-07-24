@@ -109,11 +109,13 @@ def main():
     eval_dataset = loader.create_pytorch_dataset(eval_problems, is_training=False)
 
     # Training arguments with version compatibility
-    from inspect import signature
+    import transformers
+    from packaging import version
+    
     ta_params = {
         'output_dir': str(checkpoint_dir),
         'logging_dir': str(checkpoint_dir / "logs"),
-        'num_train_epochs': 4,
+        'num_train_epochs': 10,
         'max_steps': args.max_steps,
         'per_device_train_batch_size': args.batch_size,
         'per_device_eval_batch_size': args.batch_size,
@@ -126,10 +128,13 @@ def main():
         'weight_decay': 0.01,
         'report_to': "wandb",
     }
-    sig = signature(TrainingArguments.__init__)
-    if 'evaluation_strategy' in sig.parameters:
+    
+    # Add version-specific arguments
+    transformers_version = version.parse(transformers.__version__)
+    if transformers_version >= version.parse("4.0.0"):
+        # Modern transformers (>=4.0.0)
         ta_params.update({
-            'evaluation_strategy': "steps",
+            'eval_strategy': "steps",
             'eval_steps': 250,
             'save_strategy': "steps",
             'save_steps': 500,
@@ -139,16 +144,21 @@ def main():
             'greater_is_better': False,
         })
     else:
-        # Older transformers (<3.0) compatibility
+        # Older transformers (<4.0.0)
         ta_params.update({
             'do_eval': True,
-            'evaluate_during_training': True,
             'eval_steps': 250,
             'save_steps': 500,
+            'save_total_limit': 3,
         })
+    
     training_args = TrainingArguments(**ta_params)
 
-    # Trainer
+    # Trainer with version-compatible callbacks
+    callbacks = []
+    if transformers_version >= version.parse("4.0.0"):
+        callbacks.append(EarlyStoppingCallback(early_stopping_patience=3, early_stopping_threshold=0.00001))
+    
     trainer = Trainer(
         model=model.base_model,
         args=training_args,
@@ -156,7 +166,7 @@ def main():
         eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
+        callbacks=callbacks
     )
 
     # Training
