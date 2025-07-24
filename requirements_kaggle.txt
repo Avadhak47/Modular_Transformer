@@ -2,6 +2,9 @@
 # Updated for Python 3.13 and improved Kaggle compatibility
 
 # Core ML Framework - Updated versions for Python 3.13 compatibility
+# GPU support for Kaggle T4 x2 accelerators (CUDA 11.8)
+# Use: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# Fallback CPU: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 torch>=2.5.0,<2.8.0
 torchvision>=0.20.0,<0.22.0
 transformers>=4.40.0,<4.50.0

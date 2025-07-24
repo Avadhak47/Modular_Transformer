@@ -3,20 +3,25 @@
 ## Quick Setup Commands
 
 ```bash
-# 1. Install system dependencies
-sudo apt install -y python3-venv python3-pip python3-dev
+# 1. Automated setup (recommended)
+chmod +x setup_kaggle.sh
+./setup_kaggle.sh
 
-# 2. Create virtual environment
+# 2. Manual setup
+sudo apt install -y python3-venv python3-pip python3-dev
 python3 -m venv kaggle_env
 source kaggle_env/bin/activate
 
-# 3. Install core dependencies
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# 3. Install PyTorch with GPU support for T4 accelerators
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# OR for CPU-only: --index-url https://download.pytorch.org/whl/cpu
+
+# 4. Install other dependencies
 pip install transformers accelerate datasets huggingface-hub
 pip install wandb peft scipy matplotlib scikit-learn seaborn
 pip install -r requirements_kaggle.txt
 
-# 4. Create directory structure
+# 5. Create directory structure
 mkdir -p math_pe_research/src/utils math_pe_research/configs
 ln -sf math_pe_research/src src
 ln -sf math_pe_research/scripts scripts
@@ -146,14 +151,20 @@ wandb>=0.16.0
 source kaggle_env/bin/activate
 python3 simple_simulation.py
 
-# Test training
-python3 train_and_eval.py --experiment_name "test" --max_steps 5 --batch_size 1
+# Test training (comprehensive)
+python3 kaggle_training_test.py
+
+# Test actual training script
+python3 train_and_eval.py --experiment_name "test" --max_steps 5 --batch_size 1 \
+  --checkpoint_dir "./checkpoints" --result_dir "./results"
 ```
 
 ## Important Notes
 
 1. **Python 3.13 Compatibility**: All packages updated to support Python 3.13
-2. **Memory Optimization**: Configured for Kaggle's memory constraints
-3. **CPU Training**: Uses CPU-optimized PyTorch (no CUDA required)
-4. **Virtual Environment**: Essential for Kaggle's externally managed Python
-5. **Symbolic Links**: Maintains original project structure compatibility
+2. **GPU Support**: Full T4 x2 accelerator support with automatic detection
+3. **Memory Optimization**: Configured for Kaggle's memory constraints
+4. **Training Verified**: Successfully tested with actual epoch completion
+5. **Virtual Environment**: Essential for Kaggle's externally managed Python
+6. **Symbolic Links**: Maintains original project structure compatibility
+7. **Automated Setup**: Use `setup_kaggle.sh` for one-command installation

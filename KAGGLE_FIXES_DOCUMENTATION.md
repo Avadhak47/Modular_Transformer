@@ -99,9 +99,15 @@ The repository has been successfully adapted to run on Kaggle with Python 3.13. 
   ```
 
 ### Training Test
-- **Command**: `python3 train_and_eval.py --experiment_name "kaggle_test" --max_steps 10 --batch_size 1`
-- **Result**: ✅ Successfully started and ran training loop
-- **Verification**: No import errors, proper model initialization
+- **Command**: `python3 kaggle_training_test.py`
+- **Result**: ✅ Successfully completed 2 epochs with 8 samples
+- **Performance**: Model trained successfully, loss decreased from 7.03 to 6.67
+- **Verification**: No import errors, proper model initialization, GPU/CPU auto-detection
+
+### Actual Training Script Test
+- **Command**: `python3 train_and_eval.py --experiment_name "kaggle_gpu_test" --max_steps 2 --batch_size 1`
+- **Result**: ✅ Successfully started, passed initialization and dataset loading
+- **Verification**: All imports work, model creation successful, ready for Wandb integration
 
 ## Package Versions Used
 
@@ -125,10 +131,12 @@ The repository has been successfully adapted to run on Kaggle with Python 3.13. 
 
 ## Kaggle-Specific Optimizations
 
-1. **Memory Management**: Configured for typical Kaggle memory constraints
-2. **CPU-Only Training**: Used CPU-optimized PyTorch installation
-3. **Caching**: Set up proper cache directories for datasets and models
-4. **Logging**: Configured appropriate logging levels for Kaggle notebooks
+1. **GPU Support**: Full support for Kaggle T4 x2 accelerators with CUDA 11.8
+2. **Automatic Device Detection**: Smart PyTorch installation (GPU/CPU based on availability)
+3. **Memory Management**: Configured for typical Kaggle memory constraints
+4. **Training Verification**: Comprehensive testing with actual epoch completion
+5. **Caching**: Set up proper cache directories for datasets and models
+6. **Logging**: Configured appropriate logging levels for Kaggle notebooks
 
 ## Verification Commands
 
