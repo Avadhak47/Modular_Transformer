@@ -169,9 +169,10 @@ class MathematicalReasoningModel(nn.Module):
             )
         
         # Load model
+        # Don't pass config to avoid any use_cache constructor issues
+        # The model will load with its default config
         model = AutoModelForCausalLM.from_pretrained(
             self.base_model_name,
-            config=self.config,
             torch_dtype=torch_dtype,
             device_map=device_map,
             trust_remote_code=trust_remote_code,
@@ -179,7 +180,10 @@ class MathematicalReasoningModel(nn.Module):
             cache_dir=self.cache_dir
         )
         
-        # Set use_cache after loading
+        # Update our config reference to match the loaded model
+        self.config = model.config
+        
+        # Set use_cache after loading (this is the correct way)
         if hasattr(model.config, "use_cache"):
             model.config.use_cache = False
         

@@ -1,7 +1,15 @@
 import argparse
 import os
+import sys
 import json
 from pathlib import Path
+
+# Add the src directory to Python path for module imports
+script_dir = Path(__file__).parent
+project_root = script_dir.parent
+src_dir = project_root / "src"
+sys.path.insert(0, str(src_dir))
+
 import torch
 from transformers import TrainingArguments, Trainer, EarlyStoppingCallback
 import wandb
