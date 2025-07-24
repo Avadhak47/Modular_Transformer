@@ -226,6 +226,16 @@ class MathematicalReasoningModel(nn.Module):
     def _replace_llama_positional_encoding(self, new_pe: nn.Module):
         """Replace positional encoding in various transformer architectures."""
         
+        # For RoPE-like methods, replace at attention level
+        if self.pe_method in ['rope', 'math_adaptive']:
+            self._replace_attention_level_pe(new_pe)
+        else:
+            # For additive methods, replace at embedding level
+            self._replace_embedding_level_pe(new_pe)
+    
+    def _replace_attention_level_pe(self, new_pe: nn.Module):
+        """Replace PE at the attention level (for RoPE-like methods)."""
+        
         # Auto-detect model architecture and get layers
         layers, layer_attr = self._detect_attention_layers()
         
@@ -256,7 +266,41 @@ class MathematicalReasoningModel(nn.Module):
             # Replace the attention layer
             setattr(layer, layer_attr, custom_attention)
         
-        logger.info(f"Replaced positional encoding in {len(layers)} layers")
+        logger.info(f"Replaced positional encoding in {len(layers)} attention layers")
+    
+    def _replace_embedding_level_pe(self, new_pe: nn.Module):
+        """Replace PE at the embedding level (for additive methods)."""
+        
+        # Store the PE module for embedding-level application
+        self.embedding_pe = new_pe
+        
+        # Wrap the model's forward method to apply PE at embedding level
+        original_forward = self.base_model.forward
+        
+        def forward_with_embedding_pe(*args, **kwargs):
+            # Get input_ids from args or kwargs
+            if len(args) > 0:
+                input_ids = args[0]
+                new_args = args[1:]
+            else:
+                input_ids = kwargs.pop('input_ids')
+                new_args = ()
+            
+            # Apply embedding PE
+            inputs_embeds = self.base_model.get_input_embeddings()(input_ids)
+            
+            # Apply our positional encoding
+            batch_size, seq_len = input_ids.shape
+            position_ids = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
+            inputs_embeds = self.embedding_pe(inputs_embeds, position_ids=position_ids)
+            
+            # Call original forward with inputs_embeds instead of input_ids
+            return original_forward(inputs_embeds=inputs_embeds, *new_args, **kwargs)
+        
+        # Replace the forward method
+        self.base_model.forward = forward_with_embedding_pe
+        
+        logger.info(f"Replaced positional encoding at embedding level")
     
     def _apply_lora(self) -> nn.Module:
         """Apply LoRA (Low-Rank Adaptation) for efficient fine-tuning."""
@@ -628,6 +672,51 @@ class CustomAttentionWithPE(nn.Module):
         
         # Auto-detect attention parameters if not already set
         self._detect_attention_params()
+    
+    def _detect_attention_params(self):
+        """Auto-detect attention parameters from the original attention module."""
+        
+        # Try to get num_heads from various possible attributes
+        if not hasattr(self, 'num_heads'):
+            for attr in ['num_heads', 'num_attention_heads', 'n_head', 'n_heads']:
+                if hasattr(self.original_attention, attr):
+                    self.num_heads = getattr(self.original_attention, attr)
+                    break
+            else:
+                # Fallback: try to infer from weight shapes
+                for name, param in self.original_attention.named_parameters():
+                    if 'query' in name or 'q_proj' in name or 'query_key_value' in name:
+                        # Assume hidden_size = num_heads * head_dim
+                        if hasattr(self, 'hidden_size'):
+                            self.num_heads = getattr(self, 'hidden_size', 768) // 64  # Assume head_dim=64
+                        else:
+                            self.num_heads = 12  # Default fallback
+                        break
+                else:
+                    self.num_heads = 12  # Default fallback
+        
+        # Try to get hidden_size
+        if not hasattr(self, 'hidden_size'):
+            for attr in ['hidden_size', 'd_model', 'embed_dim', 'embedding_size']:
+                if hasattr(self.original_attention, attr):
+                    self.hidden_size = getattr(self.original_attention, attr)
+                    break
+            else:
+                self.hidden_size = self.num_heads * 64  # Default: head_dim=64
+        
+        # Calculate head_dim
+        if not hasattr(self, 'head_dim'):
+            # Try to get head_dim from attention module
+            for attr in ['head_dim', 'head_size']:
+                if hasattr(self.original_attention, attr):
+                    self.head_dim = getattr(self.original_attention, attr)
+                    break
+            else:
+                # Calculate from hidden_size and num_heads
+                self.head_dim = self.hidden_size // self.num_heads
+        
+        logger.debug(f"Detected attention params: num_heads={self.num_heads}, "
+                    f"hidden_size={self.hidden_size}, head_dim={self.head_dim}")
 
     def _apply_pe(self, hidden_states, query_states=None, key_states=None, position_ids=None, token_ids=None, seq_len=None):
         """Apply the correct PE logic for each PE type."""
@@ -706,28 +795,41 @@ class CustomAttentionWithPE(nn.Module):
                 None, query_states=query_states, key_states=key_states, seq_len=seq_len
             )
             # Continue with standard attention computation
-            return self._compute_attention(
+            outputs = self._compute_attention(
                 query_states, key_states, value_states, attention_mask,
                 past_key_value, output_attentions, use_cache
             )
+            
+            # Ensure we return the expected format (at least 2 elements for unpacking)
+            if len(outputs) == 1:
+                return (outputs[0], None)  # (attn_output, attn_weights)
+            else:
+                return outputs
         else:
             # For additive PE, apply to hidden_states before attention
             hidden_states = self._apply_pe(hidden_states, position_ids=position_ids)
-            return self.original_attention(
-                hidden_states, attention_mask, position_ids,
-                past_key_value, output_attentions, use_cache, **kwargs
-            )
+            
+            # Handle different argument names for different architectures
+            if hasattr(self.original_attention, 'query_key_value'):
+                # GPT-NeoX uses 'layer_past' instead of 'past_key_value' and expects position_embeddings
+                # For non-RoPE PE, we don't provide position_embeddings (let it use original RoPE)
+                return self.original_attention(
+                    hidden_states, attention_mask, layer_past=past_key_value, 
+                    head_mask=None, use_cache=use_cache, output_attentions=output_attentions,
+                    position_embeddings=None  # Let it compute its own position embeddings
+                )
+            else:
+                # Standard transformers interface
+                return self.original_attention(
+                    hidden_states, attention_mask, position_ids,
+                    past_key_value, output_attentions, use_cache, **kwargs
+                )
     
     def _compute_attention(self, query_states, key_states, value_states, attention_mask,
                           past_key_value, output_attentions, use_cache):
         """Compute multi-head attention."""
         
-        batch_size, seq_len, num_heads, head_dim = query_states.shape
-        
-        # Transpose for attention computation
-        query_states = query_states.transpose(1, 2)  # (batch, num_heads, seq_len, head_dim)
-        key_states = key_states.transpose(1, 2)
-        value_states = value_states.transpose(1, 2)
+        batch_size, num_heads, seq_len, head_dim = query_states.shape
         
         # Compute attention scores (tensors are already in [batch, heads, seq_len, head_dim])
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(head_dim)
@@ -762,9 +864,12 @@ class CustomAttentionWithPE(nn.Module):
         else:
             logger.warning("Unknown output projection, skipping")
         
+        # Return format expected by transformers: (attn_output, attn_weights, present_key_value)
         outputs = (attn_output,)
         if output_attentions:
             outputs += (attn_weights,)
+        else:
+            outputs += (None,)  # Always include attn_weights slot
         if use_cache:
             outputs += (past_key_value,)
         
