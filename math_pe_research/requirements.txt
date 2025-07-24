@@ -1,6 +1,4 @@
 # Core ML Framework
-torch>=2.1.0
-transformers>=4.36.0
 datasets>=2.15.0
 tokenizers>=0.15.0
 
@@ -13,7 +11,6 @@ scipy>=1.11.0
 accelerate>=0.25.0
 peft>=0.7.0
 bitsandbytes>=0.41.0
-flash-attn>=2.3.0
 xformers>=0.0.22
 
 # Data Processing
@@ -47,5 +44,5 @@ mpi4py>=3.1.0
 horovod>=0.28.0
 
 # Mathematical Reasoning Specific
-latex2sympy2>=1.9.1
-antlr4-python3-runtime>=4.13.0
+latex2sympy2
+antlr4-python3-runtime

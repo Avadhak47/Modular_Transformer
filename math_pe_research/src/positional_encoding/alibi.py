@@ -94,15 +94,15 @@ class ALiBiPositionalEncoding(nn.Module):
             self._extend_bias(seq_len)
         
         # Get bias for current sequence length
-        bias = self.alibi_bias[:, :seq_len, :seq_len]
+        bias = self.alibi_bias[:, :seq_len, :seq_len]  # Shape: (1, seq_len, seq_len)
         
         # Apply slopes for each head
         head_biases = []
         for slope in self.slopes:
-            head_biases.append(bias * slope)
+            head_biases.append(bias.squeeze(0) * slope)  # Remove extra dimension and apply slope
         
-        # Stack head biases
-        return torch.stack(head_biases, dim=0)  # (num_heads, seq_len, seq_len)
+        # Stack head biases: (num_heads, seq_len, seq_len)
+        return torch.stack(head_biases, dim=0)
     
     def _extend_bias(self, new_max_len: int):
         """Extend bias matrix for longer sequences."""
@@ -138,11 +138,16 @@ class ALiBiPositionalEncoding(nn.Module):
             if bias.shape[0] != num_heads:
                 # Repeat or slice bias to match number of heads
                 if bias.shape[0] < num_heads:
-                    bias = bias.repeat(num_heads // bias.shape[0] + 1, 1, 1)
+                    repeat_factor = (num_heads + bias.shape[0] - 1) // bias.shape[0]  # Ceiling division
+                    bias = bias.repeat(repeat_factor, 1, 1)
                 bias = bias[:num_heads]
             
+            # bias is now (num_heads, seq_len, seq_len), need to make it (batch_size, num_heads, seq_len_q, seq_len_k)
+            bias = bias.unsqueeze(0)  # (1, num_heads, seq_len, seq_len)
+            bias = bias.expand(batch_size, num_heads, seq_len_q, seq_len_k)
+            
             # Apply bias
-            return attention_scores + bias[:, :seq_len_q, :seq_len_k]
+            return attention_scores + bias
         
         # If no attention scores provided, just return input
         return x

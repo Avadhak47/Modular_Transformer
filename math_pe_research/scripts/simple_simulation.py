@@ -42,39 +42,79 @@ def test_imports():
 def test_positional_encoding(pe_method="rope"):
     """Test positional encoding implementation."""
     print(f"🧪 Testing positional encoding: {pe_method}")
-    
     try:
         from positional_encoding import get_positional_encoding, PE_REGISTRY
-        
         if pe_method not in PE_REGISTRY:
             print(f"❌ PE method '{pe_method}' not in registry: {list(PE_REGISTRY.keys())}")
             return False
-        
-        # Test PE creation
-        pe_layer = get_positional_encoding(pe_method, d_model=512, max_seq_len=1024)
+        # Prepare kwargs for each PE type
+        if pe_method == 't5_relative':
+            pe_layer = get_positional_encoding(
+                pe_method,
+                d_model=512,
+                num_heads=8,
+                relative_attention_num_buckets=32,
+                relative_attention_max_distance=128,
+                bidirectional=True
+            )
+        elif pe_method == 'alibi':
+            pe_layer = get_positional_encoding(
+                pe_method,
+                d_model=512,
+                num_heads=8,
+                max_seq_len=1024
+            )
+        elif pe_method == 'diet':
+            pe_layer = get_positional_encoding(
+                pe_method,
+                d_model=512,
+                max_seq_len=1024
+            )
+        elif pe_method == 'math_adaptive':
+            pe_layer = get_positional_encoding(
+                pe_method,
+                d_model=512,
+                max_seq_len=1024
+            )
+        else:
+            pe_layer = get_positional_encoding(
+                pe_method,
+                d_model=512,
+                max_seq_len=1024
+            )
         print(f"✅ Created {pe_method} PE layer")
-        
         # Test forward pass
         import torch
-        
         if pe_method in ['rope', 'math_adaptive']:
-            # Test with attention-like input
             x = torch.randn(2, 64, 8, 64)  # (B, L, H, D)
             output = pe_layer(x)
             print(f"✅ {pe_method} forward pass: {x.shape} -> {output.shape}")
+        elif pe_method == 't5_relative':
+            x = torch.randn(2, 64, 512)
+            attention_scores = torch.randn(2, 8, 64, 64)
+            output = pe_layer(x, attention_scores=attention_scores)
+            print(f"✅ {pe_method} forward pass with attention_scores: {attention_scores.shape} -> {output.shape}")
         else:
-            # Test with embedding-like input  
             x = torch.randn(2, 64, 512)
             output = pe_layer(x)
             print(f"✅ {pe_method} forward pass: {x.shape} -> {output.shape}")
-        
         return True
-        
     except Exception as e:
         print(f"❌ PE test failed: {e}")
         if "--verbose" in sys.argv:
+            import traceback
             traceback.print_exc()
         return False
+
+def test_all_positional_encodings():
+    """Test all positional encoding types in the registry."""
+    from positional_encoding import PE_REGISTRY
+    all_passed = True
+    for pe_method in PE_REGISTRY:
+        print(f"\n=== Testing PE: {pe_method} ===")
+        passed = test_positional_encoding(pe_method)
+        all_passed = all_passed and passed
+    return all_passed
 
 def test_model_creation():
     """Test mathematical reasoning model creation."""
@@ -209,7 +249,7 @@ def run_simulation(pe_method="rope"):
     tests = [
         ("File Structure", test_file_structure),
         ("Imports", test_imports),
-        ("Positional Encoding", lambda: test_positional_encoding(pe_method)),
+        ("All Positional Encodings", test_all_positional_encodings),
         ("Dataset Loading", test_dataset_loading),
         ("Training Setup", test_training_setup),
         ("Model Creation", test_model_creation)

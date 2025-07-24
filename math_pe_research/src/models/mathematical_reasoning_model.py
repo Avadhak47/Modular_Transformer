@@ -15,6 +15,7 @@ Key Features:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math  # Add missing import
 from transformers import (
     AutoTokenizer, 
     AutoModelForCausalLM, 
@@ -55,7 +56,8 @@ class MathematicalReasoningModel(nn.Module):
         load_in_8bit: bool = False,
         trust_remote_code: bool = True,
         torch_dtype: torch.dtype = torch.float16,
-        device_map: str = "auto"
+        device_map: str = "auto",
+        cache_dir: Optional[str] = None
     ):
         super().__init__()
         
@@ -64,6 +66,7 @@ class MathematicalReasoningModel(nn.Module):
         self.pe_config = pe_config or {}
         self.use_lora = use_lora
         self.lora_config = lora_config or {}
+        self.cache_dir = cache_dir
         
         # Load tokenizer (mathematical reasoning optimized)
         self.tokenizer = self._load_tokenizer()
@@ -97,7 +100,8 @@ class MathematicalReasoningModel(nn.Module):
         tokenizer = AutoTokenizer.from_pretrained(
             self.base_model_name,
             trust_remote_code=True,
-            use_fast=True
+            use_fast=True,
+            cache_dir=self.cache_dir
         )
         
         # Add mathematical symbols if not present
@@ -134,7 +138,8 @@ class MathematicalReasoningModel(nn.Module):
         """Load model configuration."""
         config = AutoConfig.from_pretrained(
             self.base_model_name,
-            trust_remote_code=True
+            trust_remote_code=True,
+            cache_dir=self.cache_dir
         )
         
         # Store original config for PE replacement
@@ -171,8 +176,12 @@ class MathematicalReasoningModel(nn.Module):
             device_map=device_map,
             trust_remote_code=trust_remote_code,
             quantization_config=quantization_config,
-            use_cache=False  # Disable for training
+            cache_dir=self.cache_dir
         )
+        
+        # Set use_cache after loading
+        if hasattr(model.config, "use_cache"):
+            model.config.use_cache = False
         
         # Resize token embeddings if we added new tokens
         if len(self.tokenizer) > model.config.vocab_size:
@@ -188,14 +197,17 @@ class MathematicalReasoningModel(nn.Module):
         # Get model architecture details
         d_model = self.config.hidden_size
         max_position_embeddings = getattr(self.config, 'max_position_embeddings', 8192)
+        num_heads = getattr(self.config, 'num_attention_heads', 8)
         
-        # Create new positional encoding
+        # Create new positional encoding with proper arguments for each type
         pe_config = {
             'd_model': d_model,
             'max_seq_len': max_position_embeddings,
+            'num_heads': num_heads,
             **self.pe_config
         }
         
+        # The get_positional_encoding function now handles argument filtering
         new_pe = get_positional_encoding(self.pe_method, **pe_config)
         
         # Replace positional encoding in the model
@@ -205,10 +217,30 @@ class MathematicalReasoningModel(nn.Module):
     def _replace_llama_positional_encoding(self, new_pe: nn.Module):
         """Replace positional encoding in Llama-based architecture."""
         
+        # Check model architecture and handle accordingly
+        if hasattr(self.base_model, 'model') and hasattr(self.base_model.model, 'layers'):
+            # Llama/DeepSeek style models
+            layers = self.base_model.model.layers
+            layer_attr = 'self_attn'
+        elif hasattr(self.base_model, 'transformer') and hasattr(self.base_model.transformer, 'h'):
+            # GPT2 style models
+            layers = self.base_model.transformer.h
+            layer_attr = 'attn'
+        elif hasattr(self.base_model, 'layers'):
+            # Direct layer access
+            layers = self.base_model.layers
+            layer_attr = 'self_attn'
+        else:
+            logger.warning(f"Unknown model architecture, skipping PE replacement")
+            return
+        
         # For Llama/DeepSeek models, we need to modify the attention layers
-        for layer_idx, layer in enumerate(self.base_model.model.layers):
+        for layer_idx, layer in enumerate(layers):
             # Store reference to the attention layer
-            attention = layer.self_attn
+            attention = getattr(layer, layer_attr, None)
+            if attention is None:
+                logger.warning(f"No attention layer found at layer {layer_idx}")
+                continue
             
             # Create a custom attention wrapper that uses our PE
             custom_attention = CustomAttentionWithPE(
@@ -218,9 +250,9 @@ class MathematicalReasoningModel(nn.Module):
             )
             
             # Replace the attention layer
-            layer.self_attn = custom_attention
+            setattr(layer, layer_attr, custom_attention)
         
-        logger.info(f"Replaced positional encoding in {len(self.base_model.model.layers)} layers")
+        logger.info(f"Replaced positional encoding in {len(layers)} layers")
     
     def _apply_lora(self) -> nn.Module:
         """Apply LoRA (Low-Rank Adaptation) for efficient fine-tuning."""
@@ -588,7 +620,7 @@ def create_mathematical_reasoning_model(
     return MathematicalReasoningModel(
         base_model_name=base_model,
         pe_method=pe_method,
-        **kwargs
+        **kwargs  # Remove explicit cache_dir to avoid duplication
     )
 
 

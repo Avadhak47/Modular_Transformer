@@ -104,7 +104,7 @@ class MathAdaptivePositionalEncoding(nn.Module):
             base_freq * 1.5,  # Medium frequencies for variables
         ], dim=0).mean(dim=0)
         
-        return math_freq
+        return math_freqs  # Fixed variable name
     
     def _classify_mathematical_content(self, token_ids: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Classify tokens into mathematical categories."""
