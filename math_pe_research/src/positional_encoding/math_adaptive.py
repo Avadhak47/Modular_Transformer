@@ -176,7 +176,8 @@ class MathAdaptivePositionalEncoding(nn.Module):
                 adaptive_freqs = adaptive_freqs * (1.0 + (weight - 1.0) * mask_expanded)
         
         # Apply learnable adjustments
-        adaptive_freqs = adaptive_freqs * self.frequency_adjustments.unsqueeze(0).unsqueeze(0)
+        device = adaptive_freqs.device
+        adaptive_freqs = adaptive_freqs * self.frequency_adjustments.to(device).unsqueeze(0).unsqueeze(0)
         
         return adaptive_freqs
     
@@ -196,9 +197,10 @@ class MathAdaptivePositionalEncoding(nn.Module):
         bracket_levels = self._compute_bracket_levels(token_ids, classifications['brackets'])
         
         # Apply hierarchical adjustments
+        device = hier_positions.device
         for level in range(self.num_hierarchy_levels):
             level_mask = (bracket_levels == level)
-            scale = self.hierarchy_frequency_scales[level]
+            scale = self.hierarchy_frequency_scales.to(device)[level]
             hier_positions = hier_positions + level_mask.float() * scale * 0.1
         
         return hier_positions
@@ -283,7 +285,8 @@ class MathAdaptivePositionalEncoding(nn.Module):
         components.append(symbol_pos)
         
         # Combine all components with learnable weights
-        weights = F.softmax(self.combination_weights, dim=0)
+        device = x.device
+        weights = F.softmax(self.combination_weights.to(device), dim=0)
         combined_pos = sum(w * comp for w, comp in zip(weights, components))
         
         # Add to input embeddings
@@ -467,7 +470,8 @@ class MultiScalePositionEncoder(nn.Module):
             scale_encodings.append(pe)
         
         # Combine scales with learnable weights
-        weights = F.softmax(self.scale_weights, dim=0)
+        device = positions.device
+        weights = F.softmax(self.scale_weights.to(device), dim=0)
         combined = sum(w * enc for w, enc in zip(weights, scale_encodings))
         
         return combined * 0.1  # Scale down multi-scale contribution

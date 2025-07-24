@@ -188,12 +188,13 @@ class MathematicalALiBi(ALiBiPositionalEncoding):
             bias = self.get_bias(max(seq_len_q, seq_len_k))
             
             # Apply mathematical adaptations
-            adjusted_slopes = self.slopes * self.math_slope_adjustment
+            device = attention_scores.device
+            adjusted_slopes = self.slopes.to(device) * self.math_slope_adjustment.to(device)
             
             # Recalculate bias with adjusted slopes
             math_bias = []
             for slope in adjusted_slopes:
-                math_bias.append(self.alibi_bias[:, :seq_len_q, :seq_len_k] * slope)
+                math_bias.append(self.alibi_bias.to(device)[:, :seq_len_q, :seq_len_k] * slope)
             
             math_bias = torch.stack(math_bias, dim=0)
             
@@ -201,7 +202,7 @@ class MathematicalALiBi(ALiBiPositionalEncoding):
             if token_ids is not None:
                 operator_mask = self._identify_operators(token_ids)
                 if operator_mask.any():
-                    operator_bias = math_bias * self.operator_bias_scale
+                    operator_bias = math_bias * self.operator_bias_scale.to(device)
                     # Apply operator bias where operators are present
                     # This is a simplified implementation
                     math_bias = math_bias + 0.1 * operator_bias

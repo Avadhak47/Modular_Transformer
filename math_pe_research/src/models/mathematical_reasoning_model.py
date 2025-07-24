@@ -294,6 +294,9 @@ class MathematicalReasoningModel(nn.Module):
             position_ids = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
             inputs_embeds = self.embedding_pe(inputs_embeds, position_ids=position_ids)
             
+            # Remove any existing inputs_embeds from kwargs to avoid conflict
+            kwargs.pop('inputs_embeds', None)
+            
             # Call original forward with inputs_embeds instead of input_ids
             return original_forward(inputs_embeds=inputs_embeds, *new_args, **kwargs)
         
@@ -676,31 +679,27 @@ class CustomAttentionWithPE(nn.Module):
     def _detect_attention_params(self):
         """Auto-detect attention parameters from the original attention module."""
         
+        # First, try to get parameters from the model config
+        if hasattr(self.original_attention, 'config'):
+            config = self.original_attention.config
+            self.num_heads = getattr(config, 'num_attention_heads', None)
+            self.hidden_size = getattr(config, 'hidden_size', None)
+            self.head_dim = getattr(config, 'head_dim', None)
+            
+            if self.num_heads is not None and self.hidden_size is not None:
+                # Calculate head_dim if not provided
+                if self.head_dim is None:
+                    self.head_dim = self.hidden_size // self.num_heads
+                logger.debug(f"Detected from config: num_heads={self.num_heads}, "
+                           f"hidden_size={self.hidden_size}, head_dim={self.head_dim}")
+                return
+        
         # Try to get num_heads from various possible attributes
         if not hasattr(self, 'num_heads'):
             for attr in ['num_heads', 'num_attention_heads', 'n_head', 'n_heads']:
                 if hasattr(self.original_attention, attr):
                     self.num_heads = getattr(self.original_attention, attr)
                     break
-            else:
-                # Fallback: try to infer from weight shapes
-                for name, param in self.original_attention.named_parameters():
-                    if 'query_key_value' in name:
-                        # For GPT-NeoX: query_key_value weight shape is [hidden_size, 3 * hidden_size]
-                        # So hidden_size = weight.shape[0]
-                        self.hidden_size = param.shape[0]
-                        # GPT-NeoX typically uses head_dim = 64
-                        self.num_heads = self.hidden_size // 64
-                        break
-                    elif 'query' in name or 'q_proj' in name:
-                        # For other architectures
-                        if hasattr(self, 'hidden_size'):
-                            self.num_heads = self.hidden_size // 64  # Assume head_dim=64
-                        else:
-                            self.num_heads = 12  # Default fallback
-                        break
-                else:
-                    self.num_heads = 12  # Default fallback
         
         # Try to get hidden_size
         if not hasattr(self, 'hidden_size'):
@@ -708,14 +707,31 @@ class CustomAttentionWithPE(nn.Module):
                 if hasattr(self.original_attention, attr):
                     self.hidden_size = getattr(self.original_attention, attr)
                     break
-            else:
-                # Try to infer from query_key_value weight
-                for name, param in self.original_attention.named_parameters():
-                    if 'query_key_value' in name:
+        
+        # If we still don't have both, try to infer from weight shapes
+        if not hasattr(self, 'num_heads') or not hasattr(self, 'hidden_size'):
+            for name, param in self.original_attention.named_parameters():
+                if 'query_key_value' in name:
+                    # For GPT-NeoX: query_key_value weight shape is [hidden_size, 3 * hidden_size]
+                    # So hidden_size = weight.shape[0]
+                    if not hasattr(self, 'hidden_size'):
                         self.hidden_size = param.shape[0]
-                        break
-                else:
-                    self.hidden_size = self.num_heads * 64  # Default: head_dim=64
+                    
+                    # GPT-NeoX typically uses head_dim = 64
+                    if not hasattr(self, 'num_heads'):
+                        self.num_heads = self.hidden_size // 64
+                    break
+                elif 'query' in name or 'q_proj' in name:
+                    # For other architectures
+                    if hasattr(self, 'hidden_size') and not hasattr(self, 'num_heads'):
+                        self.num_heads = self.hidden_size // 64  # Assume head_dim=64
+                    break
+        
+        # Fallback values if still not found
+        if not hasattr(self, 'num_heads'):
+            self.num_heads = 40  # Common for Pythia models
+        if not hasattr(self, 'hidden_size'):
+            self.hidden_size = self.num_heads * 64  # Default: head_dim=64
         
         # Calculate head_dim
         if not hasattr(self, 'head_dim'):
@@ -728,24 +744,42 @@ class CustomAttentionWithPE(nn.Module):
                 # Calculate from hidden_size and num_heads
                 self.head_dim = self.hidden_size // self.num_heads
         
-        logger.debug(f"Detected attention params: num_heads={self.num_heads}, "
+        # Verify the relationship: hidden_size = num_heads * head_dim
+        if self.hidden_size != self.num_heads * self.head_dim:
+            logger.warning(f"Attention params mismatch: hidden_size={self.hidden_size}, "
+                         f"num_heads={self.num_heads}, head_dim={self.head_dim}")
+            # Fix the mismatch by adjusting head_dim
+            self.head_dim = self.hidden_size // self.num_heads
+            logger.info(f"Adjusted head_dim to {self.head_dim}")
+        
+        logger.debug(f"Final detected attention params: num_heads={self.num_heads}, "
                     f"hidden_size={self.hidden_size}, head_dim={self.head_dim}")
 
     def _apply_pe(self, hidden_states, query_states=None, key_states=None, position_ids=None, token_ids=None, seq_len=None):
         """Apply the correct PE logic for each PE type."""
-        # RoPE and math_adaptive: expects [batch, heads, seq_len, head_dim]
-        if self.pe_method in ['rope', 'math_adaptive']:
+        # RoPE: expects [batch, heads, seq_len, head_dim]
+        if self.pe_method in ['rope']:
             # query_states/key_states: [batch, heads, seq_len, head_dim]
             # If not already in [batch, heads, seq_len, head_dim], transpose
             if query_states is not None and key_states is not None:
-                return self.pe_layer(query_states, key_states, seq_len=seq_len)
+                return self.pe_layer(query_states, key_states)
             else:
                 raise ValueError("RoPE/m-adaptive PE requires query_states and key_states.")
         # Sinusoidal, t5_relative, diet: expects [batch, seq_len, hidden_dim] (additive)
         elif self.pe_method in ['sinusoidal', 't5_relative', 'diet']:
             # hidden_states: [batch, seq_len, hidden_dim]
             if hasattr(self.pe_layer, 'forward'):
-                return self.pe_layer(hidden_states, position_ids=position_ids)
+                return self.pe_layer(hidden_states)
+            else:
+                raise ValueError(f"PE {self.pe_method} does not support forward.")
+        # MathAdaptive: expects [batch, seq_len, hidden_dim] with token_ids
+        elif self.pe_method == 'math_adaptive':
+            # hidden_states: [batch, seq_len, hidden_dim]
+            if hasattr(self.pe_layer, 'forward'):
+                if token_ids is not None:
+                    return self.pe_layer(hidden_states, token_ids=token_ids)
+                else:
+                    return self.pe_layer(hidden_states)
             else:
                 raise ValueError(f"PE {self.pe_method} does not support forward.")
         # Alibi: expects [batch, heads, seq_len, head_dim] or [batch, seq_len, hidden_dim]
@@ -774,7 +808,7 @@ class CustomAttentionWithPE(nn.Module):
         **kwargs
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         # For RoPE-like methods, we apply PE within attention computation
-        if self.pe_method in ['rope', 'math_adaptive']:
+        if self.pe_method in ['rope']:
             # Ensure attention parameters are detected
             if not hasattr(self, 'num_heads') or not hasattr(self, 'head_dim'):
                 self._detect_attention_params()
@@ -787,37 +821,9 @@ class CustomAttentionWithPE(nn.Module):
                 value_states = self.original_attention.v_proj(hidden_states)
             elif hasattr(self.original_attention, 'query_key_value'):
                 qkv = self.original_attention.query_key_value(hidden_states)
-                # Get the actual model configuration from the original attention module
-                num_heads = getattr(self.original_attention, 'num_attention_heads', None)
-                if num_heads is None:
-                    # Try to get from the model config
-                    if hasattr(self.original_attention, 'config'):
-                        num_heads = getattr(self.original_attention.config, 'num_attention_heads', None)
-                
-                if num_heads is None:
-                    # Last resort: calculate from hidden_size
-                    hidden_size = getattr(self.original_attention, 'hidden_size', None)
-                    if hidden_size is None and hasattr(self.original_attention, 'config'):
-                        hidden_size = getattr(self.original_attention.config, 'hidden_size', None)
-                    
-                    if hidden_size is not None:
-                        # GPT-NeoX typically uses head_dim = 64
-                        head_dim = 64
-                        num_heads = hidden_size // head_dim
-                    else:
-                        # Ultimate fallback
-                        num_heads = 40  # Common for Pythia models
-                        head_dim = 64
-                else:
-                    # Calculate head_dim from hidden_size and num_heads
-                    hidden_size = getattr(self.original_attention, 'hidden_size', None)
-                    if hidden_size is None and hasattr(self.original_attention, 'config'):
-                        hidden_size = getattr(self.original_attention.config, 'hidden_size', None)
-                    
-                    if hidden_size is not None:
-                        head_dim = hidden_size // num_heads
-                    else:
-                        head_dim = 64  # Default
+                # Use the already detected parameters
+                num_heads = self.num_heads
+                head_dim = self.head_dim
                 
                 logger.debug(f"GPT-NeoX: num_heads={num_heads}, head_dim={head_dim}, qkv_shape={qkv.shape}")
                 qkv = qkv.view(batch_size, seq_len, 3, num_heads, head_dim)
@@ -825,37 +831,9 @@ class CustomAttentionWithPE(nn.Module):
                 logger.debug(f"GPT-NeoX QKV reshape: {qkv.shape} -> Q:{query_states.shape}, K:{key_states.shape}, V:{value_states.shape}")
             elif hasattr(self.original_attention, 'c_attn'):
                 qkv = self.original_attention.c_attn(hidden_states)
-                # Get the actual model configuration from the original attention module
-                num_heads = getattr(self.original_attention, 'num_attention_heads', None)
-                if num_heads is None:
-                    # Try to get from the model config
-                    if hasattr(self.original_attention, 'config'):
-                        num_heads = getattr(self.original_attention.config, 'num_attention_heads', None)
-                
-                if num_heads is None:
-                    # Last resort: calculate from hidden_size
-                    hidden_size = getattr(self.original_attention, 'hidden_size', None)
-                    if hidden_size is None and hasattr(self.original_attention, 'config'):
-                        hidden_size = getattr(self.original_attention.config, 'hidden_size', None)
-                    
-                    if hidden_size is not None:
-                        # GPT2 typically uses head_dim = 64
-                        head_dim = 64
-                        num_heads = hidden_size // head_dim
-                    else:
-                        # Ultimate fallback
-                        num_heads = 12  # Common for GPT2 models
-                        head_dim = 64
-                else:
-                    # Calculate head_dim from hidden_size and num_heads
-                    hidden_size = getattr(self.original_attention, 'hidden_size', None)
-                    if hidden_size is None and hasattr(self.original_attention, 'config'):
-                        hidden_size = getattr(self.original_attention.config, 'hidden_size', None)
-                    
-                    if hidden_size is not None:
-                        head_dim = hidden_size // num_heads
-                    else:
-                        head_dim = 64  # Default
+                # Use the already detected parameters
+                num_heads = self.num_heads
+                head_dim = self.head_dim
                 
                 logger.debug(f"GPT2: num_heads={num_heads}, head_dim={head_dim}, qkv_shape={qkv.shape}")
                 qkv = qkv.view(batch_size, seq_len, 3, num_heads, head_dim)
@@ -873,19 +851,17 @@ class CustomAttentionWithPE(nn.Module):
             value_states = value_states.transpose(1, 2)
             # Apply PE
             query_states, key_states = self._apply_pe(
-                None, query_states=query_states, key_states=key_states, seq_len=seq_len
+                None, query_states=query_states, key_states=key_states
             )
             # Continue with standard attention computation
-            outputs = self._compute_attention(
+            attn_output, attn_weights = self._compute_attention(
                 query_states, key_states, value_states, attention_mask,
                 past_key_value, output_attentions, use_cache
             )
             
-            # Ensure we return the expected format (at least 2 elements for unpacking)
-            if len(outputs) == 1:
-                return (outputs[0], None)  # (attn_output, attn_weights)
-            else:
-                return outputs
+            # Return format expected by transformers: (attn_output, attn_weights)
+            # Note: past_key_value is not handled in custom attention for now
+            return attn_output, attn_weights
         else:
             # For additive PE, apply to hidden_states before attention
             hidden_states = self._apply_pe(hidden_states, position_ids=position_ids)
@@ -945,16 +921,12 @@ class CustomAttentionWithPE(nn.Module):
         else:
             logger.warning("Unknown output projection, skipping")
         
-        # Return format expected by transformers: (attn_output, attn_weights, present_key_value)
-        outputs = (attn_output,)
+        # Return format expected by transformers: (attn_output, attn_weights)
+        # Note: past_key_value is handled separately in the forward method
         if output_attentions:
-            outputs += (attn_weights,)
+            return attn_output, attn_weights
         else:
-            outputs += (None,)  # Always include attn_weights slot
-        if use_cache:
-            outputs += (past_key_value,)
-        
-        return outputs
+            return attn_output, None
 
 
 # Factory function for easy model creation

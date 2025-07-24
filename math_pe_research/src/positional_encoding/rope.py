@@ -94,12 +94,12 @@ class RotaryPositionalEmbedding(nn.Module):
         
         # Apply mathematical enhancement if enabled
         if self.math_enhanced and hasattr(self, 'position_scaling'):
-            positions = positions * self.position_scaling
+            positions = positions * self.position_scaling.to(device)
         
         # Compute frequency matrix
         inv_freq = self.inv_freq.to(device)
         if self.math_enhanced and hasattr(self, 'freq_enhancement'):
-            inv_freq = inv_freq * self.freq_enhancement
+            inv_freq = inv_freq * self.freq_enhancement.to(device)
         
         # Compute outer product: positions × inv_freq
         freqs = torch.outer(positions, inv_freq)
@@ -201,26 +201,27 @@ class MathematicalRoPE(RotaryPositionalEmbedding):
     
     def _compute_adaptive_freq(self, positions: torch.Tensor) -> torch.Tensor:
         """Compute adaptive frequencies based on mathematical patterns."""
-        base_freq = self.inv_freq * self.freq_enhancement
+        device = positions.device
+        base_freq = self.inv_freq.to(device) * self.freq_enhancement.to(device)
         
         # Add learned bias
-        adapted_freq = base_freq + self.mathematical_bias
+        adapted_freq = base_freq + self.mathematical_bias.to(device)
         
         # Apply adaptive scaling
-        adapted_freq = adapted_freq * self.adaptive_scaling
+        adapted_freq = adapted_freq * self.adaptive_scaling.to(device)
         
         # Mathematical pattern-specific adjustments
         # (This would typically be conditioned on input content)
-        pattern_mult = (self.arithmetic_freq_mult + 
-                       self.algebraic_freq_mult + 
-                       self.geometric_freq_mult) / 3.0
+        pattern_mult = (self.arithmetic_freq_mult.to(device) + 
+                       self.algebraic_freq_mult.to(device) + 
+                       self.geometric_freq_mult.to(device)) / 3.0
         
         return adapted_freq * pattern_mult
     
     def _get_cos_sin(self, seq_len: int, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
         """Enhanced cos/sin computation with adaptive frequencies."""
         positions = torch.arange(seq_len, device=device, dtype=torch.float32)
-        positions = positions * self.scaling_factor * self.position_scaling
+        positions = positions * self.scaling_factor * self.position_scaling.to(device)
         
         # Use adaptive frequencies
         adapted_freq = self._compute_adaptive_freq(positions)
@@ -256,11 +257,11 @@ class LongSequenceRoPE(RotaryPositionalEmbedding):
         positions = positions * self.scaling_factor
         
         if self.math_enhanced and hasattr(self, 'position_scaling'):
-            positions = positions * self.position_scaling
+            positions = positions * self.position_scaling.to(device)
         
         inv_freq = self.inv_freq.to(device)
         if self.math_enhanced and hasattr(self, 'freq_enhancement'):
-            inv_freq = inv_freq * self.freq_enhancement
+            inv_freq = inv_freq * self.freq_enhancement.to(device)
         
         freqs = torch.outer(positions, inv_freq)
         freqs = torch.cat([freqs, freqs], dim=-1)

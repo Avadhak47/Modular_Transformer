@@ -91,4 +91,4 @@ class SinusoidalPositionalEncoding(nn.Module):
                 pe = self.pe[:, :seq_len, :]
         
         # Apply scaling and add to input
-        return self.dropout(x + self.scale * pe)
+        return self.dropout(x + self.scale.to(x.device) * pe)
