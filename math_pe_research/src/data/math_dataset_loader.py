@@ -684,9 +684,8 @@ Solution: {solution}"""
             'attention_mask': encoding['attention_mask'].squeeze(),
         }
         
-        # For training, labels are the same as input_ids
-        if self.is_training:
-            result['labels'] = result['input_ids'].clone()
+        # Note: We don't add 'labels' here because DataCollatorForLanguageModeling 
+        # will create labels automatically from input_ids and handle padding correctly
         
         # Add metadata
         result['problem_type'] = problem_obj.problem_type

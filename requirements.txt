@@ -1,21 +1,20 @@
 # Core ML Framework
-torch>=2.1.0
-transformers>=4.36.0
+torch>=2.0.0,<2.2.0
+torchvision>=0.15.0,<0.17.0
+transformers>=4.35.0,<4.46.0
 tokenizers>=0.15.0
 accelerate>=0.25.0
 peft>=0.7.0
 bitsandbytes>=0.41.0
 
-# Mathematical Computing
-numpy>=1.24.0
+# Mathematical Computing - Fixed numpy compatibility
+numpy>=1.24.0,<2.0.0  # Pin to avoid NumPy 2.x compatibility issues
 sympy>=1.12
 scipy>=1.11.0
-matplotlib>=3.7.0
+matplotlib>=3.7.0,<3.8.0  # Pin for numpy compatibility
 pandas>=2.1.0
 
 # Deep Learning Utilities
-flash-attn>=2.4.0
-xformers>=0.0.23
 einops>=0.7.0
 safetensors>=0.4.0
 
@@ -28,19 +27,13 @@ scikit-learn>=1.3.0
 seaborn>=0.12.0
 wandb>=0.16.0
 
-# HPC and Distributed Training
-mpi4py>=3.1.0
-nvidia-ml-py>=12.535.0
-
 # Development and Testing
 pytest>=7.4.0
 black>=23.11.0
 flake8>=6.1.0
-pre-commit>=3.5.0
 
 # Jupyter and Visualization
 jupyter>=1.0.0
-plotly>=5.17.0
 tqdm>=4.66.0
 
 # Configuration Management
@@ -50,3 +43,11 @@ hydra-core>=1.3.0
 # Mathematical Tokenization
 tiktoken>=0.5.0
 sentencepiece>=0.1.99
+
+# Removed problematic packages for Kaggle compatibility:
+# flash-attn - causes CUDA compilation issues
+# xformers - installation problems on Kaggle
+# mpi4py - not needed for single GPU training
+# nvidia-ml-py - Kaggle provides this
+# pre-commit - dev tool only
+# plotly - can cause dependency conflicts

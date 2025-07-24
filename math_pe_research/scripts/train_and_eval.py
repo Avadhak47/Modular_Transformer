@@ -11,7 +11,7 @@ src_dir = project_root / "src"
 sys.path.insert(0, str(src_dir))
 
 import torch
-from transformers import TrainingArguments, Trainer, EarlyStoppingCallback
+from transformers import TrainingArguments, Trainer, EarlyStoppingCallback, DataCollatorForLanguageModeling
 import wandb
 
 from models.mathematical_reasoning_model import create_mathematical_reasoning_model
@@ -66,6 +66,16 @@ def main():
         cache_dir=args.cache_dir
     )
     tokenizer = model.tokenizer
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"  # Important for decoder-only models
+    
+    # Create data collator for causal language modeling
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer,
+        mlm=False,  # For causal LM
+        pad_to_multiple_of=None
+    )
 
     # Data loading
     dataset_names = [d.strip() for d in args.datasets.split(",")]
@@ -75,33 +85,45 @@ def main():
     train_dataset = loader.create_pytorch_dataset(train_problems, is_training=True)
     eval_dataset = loader.create_pytorch_dataset(eval_problems, is_training=False)
 
-    # Training arguments
-    training_args = TrainingArguments(
-        output_dir=str(checkpoint_dir),
-        logging_dir=str(checkpoint_dir / "logs"),
-        num_train_epochs=4,  # Use max_steps instead
-        max_steps=args.max_steps,
-        per_device_train_batch_size=args.batch_size,
-        per_device_eval_batch_size=args.batch_size,
-        learning_rate=args.learning_rate,
-        evaluation_strategy="steps",
-        eval_steps=250,
-        save_strategy="steps",
-        save_steps=500,
-        save_total_limit=3,
-        logging_steps=50,
-        report_to="wandb",
-        fp16=True,
-        remove_unused_columns=False,
-        group_by_length=True,
-        load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
-        dataloader_num_workers=4,
-        gradient_accumulation_steps=8,
-        warmup_steps=100,
-        weight_decay=0.01,
-    )
+    # Training arguments with version compatibility
+    from inspect import signature
+    ta_params = {
+        'output_dir': str(checkpoint_dir),
+        'logging_dir': str(checkpoint_dir / "logs"),
+        'num_train_epochs': 4,
+        'max_steps': args.max_steps,
+        'per_device_train_batch_size': args.batch_size,
+        'per_device_eval_batch_size': args.batch_size,
+        'learning_rate': args.learning_rate,
+        'logging_steps': 50,
+        'fp16': True,
+        'remove_unused_columns': False,
+        'gradient_accumulation_steps': 8,
+        'warmup_steps': 100,
+        'weight_decay': 0.01,
+        'report_to': "wandb",
+    }
+    sig = signature(TrainingArguments.__init__)
+    if 'evaluation_strategy' in sig.parameters:
+        ta_params.update({
+            'evaluation_strategy': "steps",
+            'eval_steps': 250,
+            'save_strategy': "steps",
+            'save_steps': 500,
+            'save_total_limit': 3,
+            'load_best_model_at_end': True,
+            'metric_for_best_model': "eval_loss",
+            'greater_is_better': False,
+        })
+    else:
+        # Older transformers (<3.0) compatibility
+        ta_params.update({
+            'do_eval': True,
+            'evaluate_during_training': True,
+            'eval_steps': 250,
+            'save_steps': 500,
+        })
+    training_args = TrainingArguments(**ta_params)
 
     # Trainer
     trainer = Trainer(
@@ -110,6 +132,7 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         tokenizer=tokenizer,
+        data_collator=data_collator,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
     )
 
