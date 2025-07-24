@@ -9,7 +9,7 @@ import math
 from typing import Optional
 
 
-class ALiBiPositionalEncoding(nn.Module):
+class ALiBiPositionalBias(nn.Module):
     """
     ALiBi (Attention with Linear Biases) positional encoding.
     
@@ -157,7 +157,7 @@ class ALiBiPositionalEncoding(nn.Module):
         return self.slopes
 
 
-class MathematicalALiBi(ALiBiPositionalEncoding):
+class MathematicalALiBi(ALiBiPositionalBias):
     """
     ALiBi variant optimized for mathematical reasoning.
     
@@ -221,10 +221,10 @@ class MathematicalALiBi(ALiBiPositionalEncoding):
 
 
 # Factory function
-def create_alibi_encoding(variant: str = "standard", **kwargs) -> ALiBiPositionalEncoding:
+def create_alibi_encoding(variant: str = "standard", **kwargs) -> ALiBiPositionalBias:
     """Create ALiBi encoding variant."""
     if variant == "standard":
-        return ALiBiPositionalEncoding(**kwargs)
+        return ALiBiPositionalBias(**kwargs)
     elif variant == "mathematical":
         return MathematicalALiBi(**kwargs)
     else:
