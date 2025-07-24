@@ -178,7 +178,7 @@ class MathematicalReasoningEvaluator:
     
     def calculate_perplexity(self, model: torch.nn.Module, 
                            texts: List[str], 
-                           device: torch.device = None) -> Dict[str, float]:
+                           device: Optional[torch.device] = None) -> Dict[str, float]:
         """
         Calculate perplexity as specified in the proposal.
         
@@ -225,13 +225,13 @@ class MathematicalReasoningEvaluator:
         overall_perplexity = math.exp(total_log_likelihood / total_tokens) if total_tokens > 0 else float('inf')
         
         return {
-            "perplexity": overall_perplexity,
-            "mean_perplexity": np.mean(perplexities) if perplexities else float('inf'),
-            "std_perplexity": np.std(perplexities) if perplexities else 0.0,
-            "min_perplexity": np.min(perplexities) if perplexities else float('inf'),
-            "max_perplexity": np.max(perplexities) if perplexities else float('inf'),
-            "total_tokens": total_tokens,
-            "num_sequences": len(perplexities)
+            "perplexity": float(overall_perplexity),
+            "mean_perplexity": float(np.mean(perplexities)) if perplexities else 0.0,
+            "std_perplexity": float(np.std(perplexities)) if perplexities else 0.0,
+            "min_perplexity": float(np.min(perplexities)) if perplexities else float('inf'),
+            "max_perplexity": float(np.max(perplexities)) if perplexities else float('inf'),
+            "total_tokens": int(total_tokens),
+            "num_sequences": int(len(perplexities))
         }
     
     def attention_entropy(self, attention_weights: torch.Tensor) -> Dict[str, float]:
@@ -290,16 +290,16 @@ class MathematicalReasoningEvaluator:
         max_entropy = math.log(seq_len)
         
         return {
-            "mean_attention_entropy": np.mean(all_entropies),
-            "std_attention_entropy": np.std(all_entropies),
-            "head_entropy_mean": np.mean(head_entropies),
-            "head_entropy_std": np.std(head_entropies),
-            "position_entropy_mean": np.mean(position_entropies),
-            "position_entropy_std": np.std(position_entropies),
-            "normalized_entropy": np.mean(all_entropies) / max_entropy,
-            "max_possible_entropy": max_entropy,
-            "entropy_efficiency": 1.0 - (np.mean(all_entropies) / max_entropy),
-            "total_attention_positions": len(all_entropies)
+            "mean_attention_entropy": float(np.mean(all_entropies)),
+            "std_attention_entropy": float(np.std(all_entropies)),
+            "head_entropy_mean": float(np.mean(head_entropies)),
+            "head_entropy_std": float(np.std(head_entropies)),
+            "position_entropy_mean": float(np.mean(position_entropies)),
+            "position_entropy_std": float(np.std(position_entropies)),
+            "normalized_entropy": float(np.mean(all_entropies) / max_entropy),
+            "max_possible_entropy": float(max_entropy),
+            "entropy_efficiency": float(1.0 - (np.mean(all_entropies) / max_entropy)),
+            "total_attention_positions": int(len(all_entropies))
         }
     
     def comprehensive_evaluation(self, 
@@ -310,7 +310,7 @@ class MathematicalReasoningEvaluator:
                                problems: List[str],
                                solutions: List[str],
                                attention_weights: Optional[torch.Tensor] = None,
-                               device: torch.device = None) -> Dict[str, Any]:
+                               device: Optional[torch.device] = None) -> Dict[str, Any]:
         """
         Perform comprehensive evaluation with all metrics specified in the proposal.
         """

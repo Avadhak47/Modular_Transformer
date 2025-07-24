@@ -30,7 +30,15 @@ class ModelEvaluator:
         
         # Load checkpoint
         checkpoint = torch.load(model_path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
+        state_dict = checkpoint['model_state_dict']
+        # If keys are prefixed with 'module.', remove it
+        if any(k.startswith('module.') for k in state_dict.keys()):
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                new_key = k[7:] if k.startswith('module.') else k
+                new_state_dict[new_key] = v
+            state_dict = new_state_dict
+        self.model.load_state_dict(state_dict)
         self.model.eval()
         
         # Loss function
@@ -52,6 +60,9 @@ class ModelEvaluator:
                 
                 tgt_input = tgt[:, :-1]
                 tgt_output = tgt[:, 1:]
+                # Guard against short sequences
+                if tgt.size(1) < 2:
+                    raise ValueError("Target sequence too short for teacher forcing (must be at least 2 timesteps)")
                 
                 logits = self.model(src, tgt_input)
                 loss = self.criterion(logits.reshape(-1, logits.size(-1)), tgt_output.reshape(-1))
@@ -199,6 +210,7 @@ def main():
                        help='Benchmark inference speed')
     parser.add_argument('--analyze_attention', action='store_true',
                        help='Analyze attention patterns')
+    parser.add_argument('--config_file', type=str, default=None, help='Path to config JSON if not in checkpoint')
     
     args = parser.parse_args()
     
@@ -226,7 +238,14 @@ def main():
         
         # Load checkpoint to get config
         checkpoint = torch.load(args.model_path, map_location='cpu')
-        config = ExperimentConfig.from_dict(checkpoint['config'])
+        if 'config' in checkpoint:
+            config = ExperimentConfig.from_dict(checkpoint['config'])
+        else:
+            if args.config_file is None:
+                raise ValueError('Config not found in checkpoint and no --config_file provided.')
+            with open(args.config_file, 'r') as f:
+                config_dict = json.load(f)
+            config = ExperimentConfig.from_dict(config_dict)
         
         # Create evaluator
         evaluator = ModelEvaluator(args.model_path, config)

@@ -57,9 +57,21 @@ class MultiHeadAttention(nn.Module):
             if hasattr(pos_encoding, 'get_encoding_type'):
                 if pos_encoding.get_encoding_type() == 'alibi':
                     alibi_bias = pos_encoding.get_alibi_bias(k_len, query.device)
+                    # Ensure scores and alibi_bias have matching (q_len, k_len) for cross-attention
+                    if (scores.shape[-2:] != alibi_bias.shape[-2:]):
+                        min_q = min(scores.shape[-2], alibi_bias.shape[-2])
+                        min_k = min(scores.shape[-1], alibi_bias.shape[-1])
+                        scores = scores[..., :min_q, :min_k]
+                        alibi_bias = alibi_bias[..., :min_q, :min_k]
                     scores += alibi_bias.unsqueeze(0)
                 elif pos_encoding.get_encoding_type() == 't5_relative':
                     relative_bias = pos_encoding.get_bidirectional_bias(k_len, query.device)
+                    # Ensure scores and relative_bias have matching (q_len, k_len) for cross-attention/generation
+                    if (scores.shape[-2:] != relative_bias.shape[-2:]):
+                        min_q = min(scores.shape[-2], relative_bias.shape[-2])
+                        min_k = min(scores.shape[-1], relative_bias.shape[-1])
+                        scores = scores[..., :min_q, :min_k]
+                        relative_bias = relative_bias[..., :min_q, :min_k]
                     scores += relative_bias
 
         # Apply mask if provided

@@ -36,6 +36,9 @@ def main():
         optimizer.zero_grad()
         
         # Forward pass
+        # Guard against short sequences
+        if tgt.size(1) < 2:
+            raise ValueError("Target sequence too short for teacher forcing (must be at least 2 timesteps)")
         tgt_input = tgt[:, :-1]
         tgt_output = tgt[:, 1:]
         

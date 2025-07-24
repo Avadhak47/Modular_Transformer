@@ -4,12 +4,14 @@ Complete data pipeline for MATH and GSM8K datasets with mathematical reasoning s
 import re
 import json
 import torch
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Any
 from datasets import load_dataset, Dataset
 from transformers import AutoTokenizer
 import numpy as np
 from dataclasses import dataclass
 import logging
+import os
+from sklearn.model_selection import train_test_split
 
 @dataclass
 class MathematicalProblem:
@@ -23,57 +25,152 @@ class MathematicalProblem:
     dataset_source: str = "unknown"
     
 class MathematicalDatasetLoader:
-    """Advanced loader for MATH and GSM8K datasets with chain-of-thought processing."""
+    """Advanced loader for MATH and GSM8K datasets with chain-of-thought processing, now using local files and SOTA tokenizer."""
     
-    def __init__(self, tokenizer_name: str = "gpt2", max_length: int = 1024):
+    def __init__(self, tokenizer_name: str = "mistralai/Mistral-7B-v0.1", max_length: int = 1024):
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.max_length = max_length
         self.logger = logging.getLogger(__name__)
-        
+    
+    def load_local_jsonl(self, path):
+        with open(path, "r") as f:
+            return [json.loads(line) for line in f]
+    
+    def load_gsm8k_local(self, split="train"):
+        data = self.load_local_jsonl(f"local_data/gsm8k_{split}.jsonl")
+        return [self._convert_gsm8k_item(item) for item in data]
+    
+    def load_math_local(self, split="train"):
+        data = self.load_local_jsonl(f"local_data/math_{split}.jsonl")
+        return [self._convert_math_item(item) for item in data]
+    
+    def load_combined_train_test(self, test_size=0.1, random_state=42):
+        gsm8k = self.load_gsm8k_local("train")
+        math = self.load_math_local("train")
+        all_data = gsm8k + math
+        train, test = train_test_split(all_data, test_size=test_size, random_state=random_state)
+        return train, test
+    
+    def _convert_gsm8k_item(self, item):
+        question = item.get('question', item.get('input', item.get('problem', '')))
+        answer = item.get('answer', item.get('output', item.get('solution', '')))
+        reasoning_steps = self._extract_gsm8k_reasoning_steps(answer)
+        final_answer = self._extract_gsm8k_final_answer(answer)
+        return MathematicalProblem(
+            problem=question,
+            solution=answer,
+            final_answer=final_answer,
+            reasoning_steps=reasoning_steps,
+            dataset_source="gsm8k"
+        )
+    
+    def _convert_math_item(self, item):
+        problem_text = item.get('problem', item.get('question', item.get('input', '')))
+        solution = item.get('solution', item.get('answer', item.get('output', '')))
+        problem_type = item.get('type', item.get('subject', 'Unknown'))
+        level = str(item.get('level', 'Unknown'))
+        reasoning_steps = self._extract_math_reasoning_steps(solution)
+        final_answer = self._extract_math_final_answer(solution)
+        return MathematicalProblem(
+            problem=problem_text,
+            solution=solution,
+            final_answer=final_answer,
+            reasoning_steps=reasoning_steps,
+            problem_type=problem_type,
+            difficulty_level=level,
+            dataset_source="math"
+        )
+    
     def load_gsm8k_dataset(self, split: str = "train") -> List[MathematicalProblem]:
-        """Load GSM8K dataset with proper preprocessing."""
+        """Load GSM8K dataset with proper preprocessing and enhanced error handling."""
+        print(f"Loading GSM8K dataset ({split} split)...")
+        
         try:
+            # Try to load the dataset
+            print("Attempting to load GSM8K from HuggingFace...")
             dataset = load_dataset("openai/gsm8k", "main", split=split)
-            # Handle IterableDataset which doesn't support len()
+            print(f"✓ Successfully loaded GSM8K dataset from HuggingFace")
+            
+            # Get dataset info
             try:
                 num_examples = len(dataset) if isinstance(dataset, Dataset) else "unknown number of"
+                print(f"Dataset contains {num_examples} examples")
             except (TypeError, AttributeError):
-                num_examples = "unknown number of"
-            self.logger.info(f"Successfully loaded GSM8K {split} split with {num_examples} examples")
+                print("Could not determine dataset size (IterableDataset)")
+            
+            # Debug: Print sample item to check structure
+            try:
+                if len(dataset) > 0:  # type: ignore
+                    sample_item = dataset[0] if isinstance(dataset, Dataset) else next(iter(dataset))
+                    if hasattr(sample_item, 'keys'):
+                        print(f"Sample item keys: {list(sample_item.keys())}")  # type: ignore
+                    print(f"Sample item: {sample_item}")
+            except (TypeError, AttributeError):
+                # Handle IterableDataset case
+                try:
+                    sample_item = next(iter(dataset))
+                    if hasattr(sample_item, 'keys'):
+                        print(f"Sample item keys: {list(sample_item.keys())}")  # type: ignore
+                    print(f"Sample item: {sample_item}")
+                except StopIteration:
+                    print("Dataset is empty")
+                    return []
+                    
         except Exception as e:
-            self.logger.error(f"Failed to load GSM8K dataset: {e}")
+            print(f"✗ Failed to load GSM8K dataset from HuggingFace: {e}")
+            print("This might be due to network issues or dataset availability.")
             return []
         
         problems = []
+        try:
+            num_examples = len(dataset)
+        except TypeError:
+            num_examples = "unknown (IterableDataset)"
+        print(f"Processing {num_examples} GSM8K problems...")
+        
         for idx, item in enumerate(dataset):
             try:
+                # Handle different possible field names
+                question = item.get('question', item.get('input', item.get('problem', '')))
+                answer = item.get('answer', item.get('output', item.get('solution', '')))
+                
+                if not question or not answer:
+                    print(f"Warning: GSM8K item {idx}: Missing question or answer")
+                    print(f"  question='{question[:50]}...', answer='{answer[:50]}...'")
+                    continue
+                
                 # Extract reasoning steps from the solution
-                solution = item['answer']
-                reasoning_steps = self._extract_gsm8k_reasoning_steps(solution)
+                reasoning_steps = self._extract_gsm8k_reasoning_steps(answer)
                 
                 # Extract the final numerical answer
-                final_answer = self._extract_gsm8k_final_answer(solution)
+                final_answer = self._extract_gsm8k_final_answer(answer)
                 
                 problem = MathematicalProblem(
-                    problem=item['question'],
-                    solution=solution,
+                    problem=question,
+                    solution=answer,
                     final_answer=final_answer,
                     reasoning_steps=reasoning_steps,
                     dataset_source="gsm8k"
                 )
                 problems.append(problem)
                 
+                # Progress indicator
+                if (idx + 1) % 1000 == 0:
+                    print(f"Processed {idx + 1} problems...")
+                
             except Exception as e:
-                self.logger.warning(f"Error processing GSM8K item {idx}: {e}")
+                print(f"Error processing GSM8K item {idx}: {e}")
                 continue
                 
-        self.logger.info(f"Successfully processed {len(problems)} GSM8K problems")
+        print(f"✓ Successfully processed {len(problems)} GSM8K problems")
         return problems
     
     def load_math_dataset(self, split: str = "train", max_samples: Optional[int] = None) -> List[MathematicalProblem]:
-        """Load MATH dataset with comprehensive preprocessing."""
+        """Load MATH dataset with comprehensive preprocessing and enhanced error handling."""
+        print(f"Loading MATH dataset ({split} split)...")
+        
         dataset = None
         sources = [
             ("Dahoas/MATH", ["train", "test"]),
@@ -82,22 +179,47 @@ class MathematicalDatasetLoader:
 
         for source, valid_splits in sources:
             if split not in valid_splits:
+                print(f"Skipping {source} - split '{split}' not available")
                 continue
+                
             try:
+                print(f"Attempting to load MATH dataset from {source}...")
                 dataset = load_dataset(source, split=split)
-                # Handle IterableDataset which doesn't support len()
+                print(f"✓ Successfully loaded MATH dataset from {source}")
+                
+                # Get dataset info
                 try:
                     num_examples = len(dataset) if isinstance(dataset, Dataset) else "unknown number of"
+                    print(f"Dataset contains {num_examples} examples")
                 except (TypeError, AttributeError):
-                    num_examples = "unknown number of"
-                self.logger.info(f"Successfully loaded MATH dataset from {source} ({split}) with {num_examples} examples")
+                    print("Could not determine dataset size (IterableDataset)")
+                
+                # Debug: Print sample item to check structure
+                try:
+                    if len(dataset) > 0:  # type: ignore
+                        sample_item = dataset[0] if isinstance(dataset, Dataset) else next(iter(dataset))
+                        if hasattr(sample_item, 'keys'):
+                            print(f"Sample item keys: {list(sample_item.keys())}")  # type: ignore
+                        print(f"Sample item: {sample_item}")
+                except (TypeError, AttributeError):
+                    # Handle IterableDataset case
+                    try:
+                        sample_item = next(iter(dataset))
+                        if hasattr(sample_item, 'keys'):
+                            print(f"Sample item keys: {list(sample_item.keys())}")  # type: ignore
+                        print(f"Sample item: {sample_item}")
+                    except StopIteration:
+                        print("Dataset is empty")
+                        continue
+                        
                 break
             except Exception as e:
-                self.logger.warning(f"Failed to load from {source}: {e}")
+                print(f"✗ Failed to load from {source}: {e}")
                 continue
 
         if dataset is None:
-            self.logger.error("Could not load MATH dataset from any supported source. Please download or provide the dataset manually.")
+            print("✗ Could not load MATH dataset from any supported source.")
+            print("This might be due to network issues or dataset availability.")
             return []
 
         problems = []
@@ -106,18 +228,25 @@ class MathematicalDatasetLoader:
             total_items = len(dataset) if isinstance(dataset, Dataset) else None
             if max_samples is not None and total_items is not None:
                 total_items = min(total_items, max_samples)
+                print(f"Will process up to {total_items} samples")
         except (TypeError, AttributeError):
             total_items = None
 
+        print(f"Processing MATH problems...")
         for idx, item in enumerate(dataset):
             if max_samples and idx >= max_samples:
                 break
             try:
                 # Extract problem components (handle both Dahoas/MATH and H4/MATH-500 fields)
-                problem_text = item.get('problem', item.get('question', ''))
-                solution = item.get('solution', item.get('answer', ''))
+                problem_text = item.get('problem', item.get('question', item.get('input', '')))
+                solution = item.get('solution', item.get('answer', item.get('output', '')))
                 problem_type = item.get('type', item.get('subject', 'Unknown'))
                 level = str(item.get('level', 'Unknown'))
+
+                if not problem_text or not solution:
+                    print(f"Warning: MATH item {idx}: Missing problem or solution")
+                    print(f"  problem='{problem_text[:50]}...', solution='{solution[:50]}...'")
+                    continue
 
                 # Process reasoning steps
                 reasoning_steps = self._extract_math_reasoning_steps(solution)
@@ -135,11 +264,16 @@ class MathematicalDatasetLoader:
                     dataset_source="math"
                 )
                 problems.append(problem)
+                
+                # Progress indicator
+                if (idx + 1) % 1000 == 0:
+                    print(f"Processed {idx + 1} problems...")
+                    
             except Exception as e:
-                self.logger.warning(f"Error processing MATH item {idx}: {e}")
+                print(f"Error processing MATH item {idx}: {e}")
                 continue
 
-        self.logger.info(f"Successfully processed {len(problems)} MATH problems")
+        print(f"✓ Successfully processed {len(problems)} MATH problems")
         return problems
     
     def _extract_gsm8k_reasoning_steps(self, solution: str) -> List[str]:
@@ -168,7 +302,10 @@ class MathematicalDatasetLoader:
         
         # Fallback: extract last number from solution
         numbers = re.findall(r'\b\d+(?:\.\d+)?\b', solution)
-        return numbers[-1] if numbers else ""
+        if numbers:
+            return numbers[-1]
+        else:
+            return ""
     
     def _extract_math_reasoning_steps(self, solution: str) -> List[str]:
         """Extract reasoning steps from MATH dataset solutions."""
@@ -227,34 +364,30 @@ class MathematicalDatasetLoader:
         """Prepare tokenized training data with chain-of-thought format."""
         inputs = []
         targets = []
-        
         for problem in problems:
             # Create chain-of-thought input
             input_text = self.create_chain_of_thought_prompt(problem.problem)
-            
             # Format target with reasoning steps + final answer
             target_text = problem.solution
-            
             inputs.append(input_text)
             targets.append(target_text)
-        
-        # Tokenize inputs and targets
+
+        # Use the same max_length for both input and target to avoid shape mismatches
+        # Use padding='max_length' for consistent tensor shapes
         input_encodings = self.tokenizer(
             inputs,
             truncation=True,
-            padding=True,
-            max_length=self.max_length // 2,  # Leave room for generation
-            return_tensors="pt"
-        )
-        
-        target_encodings = self.tokenizer(
-            targets,
-            truncation=True,
-            padding=True,
+            padding='max_length',
             max_length=self.max_length,
             return_tensors="pt"
         )
-        
+        target_encodings = self.tokenizer(
+            targets,
+            truncation=True,
+            padding='max_length',
+            max_length=self.max_length,
+            return_tensors="pt"
+        )
         return {
             "input_ids": input_encodings["input_ids"],
             "attention_mask": input_encodings["attention_mask"],

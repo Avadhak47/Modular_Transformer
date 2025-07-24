@@ -51,3 +51,51 @@ class ModelConfig:
     def from_dict(cls, config_dict: Dict[str, Any]) -> "ModelConfig":
         """Create config from dictionary."""
         return cls(**config_dict)
+
+    @classmethod
+    def get_preset(cls, size: str = "small", positional_encoding: str = "sinusoidal") -> "ModelConfig":
+        """
+        Return a ModelConfig for a given size preset.
+        Presets:
+        - small: ~current (d_model=512, n_heads=8, d_ff=2048, 6 layers)
+        - medium: ~10x params (d_model=1600, n_heads=16, d_ff=6400, 12 layers)
+        - large: ~100x params (d_model=5000, n_heads=32, d_ff=20000, 24 layers)
+        """
+        if size == "small":
+            return cls(
+                d_model=512,
+                n_heads=8,
+                d_ff=2048,
+                n_encoder_layers=6,
+                n_decoder_layers=6,
+                vocab_size=32000,
+                max_seq_len=512,
+                dropout=0.1,
+                positional_encoding=positional_encoding
+            )
+        elif size == "medium":
+            return cls(
+                d_model=1600,
+                n_heads=16,
+                d_ff=6400,
+                n_encoder_layers=12,
+                n_decoder_layers=12,
+                vocab_size=32000,
+                max_seq_len=1024,
+                dropout=0.1,
+                positional_encoding=positional_encoding
+            )
+        elif size == "large":
+            return cls(
+                d_model=5120,
+                n_heads=32,
+                d_ff=20000,
+                n_encoder_layers=24,
+                n_decoder_layers=24,
+                vocab_size=32000,
+                max_seq_len=2048,
+                dropout=0.1,
+                positional_encoding=positional_encoding
+            )
+        else:
+            raise ValueError(f"Unknown model size: {size}")

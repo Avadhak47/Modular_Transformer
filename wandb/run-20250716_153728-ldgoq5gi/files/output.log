@@ -1,0 +1,87 @@
+WandB initialized successfully
+Starting training...
+2025-07-16 15:37:30,805 - INFO - Starting mathematical reasoning training...
+2025-07-16 15:37:30,805 - INFO - Loading datasets from local files...
+=== Loading Datasets from Local Files ===
+✓ Local train loaded: 13475 problems
+✓ Local test loaded: 1498 problems
+Total training problems: 13475
+Total test problems: 1498
+Creating PyTorch datasets...
+Dataset initialized with 13475 problems
+Dataset initialized with 1498 problems
+✓ Train dataset size: 13475
+✓ Test dataset size: 1498
+Creating data loaders...
+✓ Train loader batches: 6738
+✓ Test loader batches: 375
+=== Dataset Loading Complete ===
+2025-07-16 15:37:31,101 - INFO -
+Epoch 1/10
+Training Epoch 1:   0%|                 | 31/6738 [00:24<49:38,  2.25it/s]
+Error in training batch 0: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 1: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 2: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 3: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 4: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 5: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 6: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 7: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 8: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 9: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 10: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 11: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 12: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 13: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 14: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 15: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 16: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 17: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 18: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 19: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 20: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 21: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 22: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 23: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 24: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 25: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 26: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 27: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 28: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 29: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 30: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 31: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 32: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 33: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 34: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 35: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 36: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 37: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 38: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 39: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 40: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 41: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 42: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 43: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 44: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 45: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 46: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 47: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 48: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 49: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 50: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 51: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 52: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 53: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 54: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 55: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 56: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 57: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 58: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 59: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 60: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 61: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 62: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 63: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 64: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2
+Error in training batch 65: The size of tensor a (1023) must match the size of tensor b (512) at non-singleton dimension 2

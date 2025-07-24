@@ -38,8 +38,9 @@ class SinusoidalPositionalEncoding(BasePositionalEncoding):
         
         # Apply cosine to odd indices (1, 3, 5, ...)
         if d_model % 2 == 1:
-            # If d_model is odd, we need to handle the last dimension
-            pe[:, 1::2] = torch.cos(position * div_term[:-1])
+            # If d_model is odd, handle the last dimension safely
+            if div_term.numel() > 1:
+                pe[:, 1:-1:2] = torch.cos(position * div_term[:-1])
             pe[:, -1] = torch.cos(position.squeeze(-1) * div_term[-1])
         else:
             pe[:, 1::2] = torch.cos(position * div_term)
@@ -110,7 +111,8 @@ class SinusoidalPositionalEncoding(BasePositionalEncoding):
         pe[:, 0::2] = torch.sin(position * div_term)
         
         if self.d_model % 2 == 1:
-            pe[:, 1::2] = torch.cos(position * div_term[:-1])
+            if div_term.numel() > 1:
+                pe[:, 1:-1:2] = torch.cos(position * div_term[:-1])
             pe[:, -1] = torch.cos(position.squeeze(-1) * div_term[-1])
         else:
             pe[:, 1::2] = torch.cos(position * div_term)

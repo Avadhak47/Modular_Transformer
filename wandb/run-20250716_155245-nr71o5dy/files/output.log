@@ -1,0 +1,63 @@
+WandB initialized successfully
+Starting training...
+2025-07-16 15:52:47,662 - INFO - Starting mathematical reasoning training...
+2025-07-16 15:52:47,662 - INFO - Loading datasets from local files...
+=== Loading Datasets from Local Files ===
+✓ Local train loaded: 13475 problems
+✓ Local test loaded: 1498 problems
+Total training problems: 13475
+Total test problems: 1498
+Creating PyTorch datasets...
+Dataset initialized with 13475 problems
+Dataset initialized with 1498 problems
+✓ Train dataset size: 13475
+✓ Test dataset size: 1498
+Creating data loaders...
+✓ Train loader batches: 6738
+✓ Test loader batches: 375
+=== Dataset Loading Complete ===
+2025-07-16 15:52:47,921 - INFO -
+Epoch 1/1
+Training Epoch 1:   0%|                                                            | 0/6738 [00:00<?, ?it/s]Traceback (most recent call last):
+Batch 0 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1023])
+  target_labels: torch.Size([2, 1023])
+Error in training batch 0: The size of tensor a (1023) must match the size of tensor b (1024) at non-singleton dimension 2
+  File "/Users/avadhesh/development/miniProject/Transformer/training/mathematical_reasoning_trainer.py", line 286, in train_epoch
+    outputs = self.model(input_ids, decoder_input)
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/Users/avadhesh/development/miniProject/Transformer/src/model.py", line 128, in forward
+    decoder_output = self.decoder(tgt_encoded, encoder_output, src_mask, tgt_mask, self.pos_encoding)
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/Users/avadhesh/development/miniProject/Transformer/src/layers/decoder.py", line 80, in forward
+    x = layer(x, encoder_output, src_mask, tgt_mask, pos_encoding)
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/Users/avadhesh/development/miniProject/Transformer/src/layers/decoder.py", line 48, in forward
+    cross_attn_output, _ = self.cross_attention(
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/Users/avadhesh/development/miniProject/Transformer/src/layers/attention.py", line 68, in forward
+    scores += relative_bias
+RuntimeError: The size of tensor a (1023) must match the size of tensor b (1024) at non-singleton dimension 2
+Stopping training due to shape mismatch or other error.
+Training Epoch 1:   0%|                                                            | 0/6738 [00:21<?, ?it/s]
+2025-07-16 15:53:09,638 - INFO - Training Loss: 0.0000
+2025-07-16 15:53:09,653 - INFO - Evaluation history saved to results/evaluation_history_t5_relative.json
+2025-07-16 15:53:09,653 - INFO -
+Training completed!
+2025-07-16 15:53:09,654 - INFO - Best accuracy achieved: 0.0000
+Training completed!

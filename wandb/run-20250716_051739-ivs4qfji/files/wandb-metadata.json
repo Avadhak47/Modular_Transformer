@@ -1,0 +1,37 @@
+{
+  "os":  "macOS-14.7.1-arm64-arm-64bit",
+  "python":  "CPython 3.10.17",
+  "startedAt":  "2025-07-15T23:47:39.549396Z",
+  "program":  "/Users/avadhesh/development/miniProject/Transformer/test_trainer_dataset_loading.py",
+  "codePath":  "test_trainer_dataset_loading.py",
+  "codePathLocal":  "test_trainer_dataset_loading.py",
+  "git":  {
+    "remote":  "https://github.com/Avadhak47/Modular_Transformer",
+    "commit":  "d8609917d260c67fa395b26b3295dd41e47e8610"
+  },
+  "email":  "eet242799@iitd.ac.in",
+  "root":  "/Users/avadhesh/development/miniProject/Transformer",
+  "host":  "Avadheshs-MacBook-Air.local",
+  "executable":  "/Users/avadhesh/.pyenv/versions/3.10.17/bin/python",
+  "cpu_count":  8,
+  "cpu_count_logical":  8,
+  "disk":  {
+    "/":  {
+      "total":  "245107195904",
+      "used":  "228491198464"
+    }
+  },
+  "memory":  {
+    "total":  "8589934592"
+  },
+  "apple":  {
+    "name":  "Apple M1",
+    "ecpuCores":  4,
+    "pcpuCores":  4,
+    "gpuCores":  7,
+    "memoryGb":  8,
+    "swapTotalBytes":  "12884901888",
+    "ramTotalBytes":  "8589934592"
+  },
+  "writerId":  "axp3db942te616eg6o8wplusnrusalt1"
+}

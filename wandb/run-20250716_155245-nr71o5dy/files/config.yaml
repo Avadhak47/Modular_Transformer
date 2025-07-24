@@ -1,0 +1,115 @@
+_wandb:
+    value:
+        cli_version: 0.21.0
+        e:
+            fvk3p1gpnz2ao5s3a1bxy6x2t23im3hc:
+                apple:
+                    ecpuCores: 4
+                    gpuCores: 7
+                    memoryGb: 8
+                    name: Apple M1
+                    pcpuCores: 4
+                    ramTotalBytes: "8589934592"
+                    swapTotalBytes: "16106127360"
+                args:
+                    - --pe_type
+                    - t5_relative
+                    - --epochs
+                    - "1"
+                    - --batch_size
+                    - "2"
+                    - --model_size
+                    - small
+                codePath: training/mathematical_reasoning_trainer.py
+                codePathLocal: training/mathematical_reasoning_trainer.py
+                cpu_count: 8
+                cpu_count_logical: 8
+                disk:
+                    /:
+                        total: "245107195904"
+                        used: "230135558144"
+                email: eet242799@iitd.ac.in
+                executable: /Users/avadhesh/.pyenv/versions/3.10.17/bin/python
+                git:
+                    commit: d8609917d260c67fa395b26b3295dd41e47e8610
+                    remote: https://github.com/Avadhak47/Modular_Transformer
+                host: Avadheshs-MacBook-Air.local
+                memory:
+                    total: "8589934592"
+                os: macOS-14.7.1-arm64-arm-64bit
+                program: /Users/avadhesh/development/miniProject/Transformer/training/mathematical_reasoning_trainer.py
+                python: CPython 3.10.17
+                root: /Users/avadhesh/development/miniProject/Transformer
+                startedAt: "2025-07-16T10:22:45.905304Z"
+                writerId: fvk3p1gpnz2ao5s3a1bxy6x2t23im3hc
+        m: []
+        python_version: 3.10.17
+        t:
+            "1":
+                - 1
+                - 5
+                - 11
+                - 49
+                - 51
+                - 53
+            "2":
+                - 1
+                - 5
+                - 11
+                - 49
+                - 51
+                - 53
+            "3":
+                - 13
+                - 15
+                - 16
+            "4": 3.10.17
+            "5": 0.21.0
+            "6": 4.53.1
+            "12": 0.21.0
+            "13": darwin-arm64
+batch_size:
+    value: 2
+checkpoint_dir:
+    value: checkpoints
+eval_batch_size:
+    value: 4
+eval_interval:
+    value: 2
+experiment_suffix:
+    value: ""
+gradient_accumulation_steps:
+    value: 4
+learning_rate:
+    value: 0.0001
+max_length:
+    value: 1024
+model:
+    value:
+        d_ff: 1024
+        d_model: 256
+        dropout: 0.1
+        max_seq_len: 1024
+        n_decoder_layers: 4
+        n_encoder_layers: 4
+        n_heads: 8
+        positional_encoding: t5_relative
+        vocab_size: 32000
+num_epochs:
+    value: 1
+num_workers:
+    value: 2
+positional_encoding:
+    value: t5_relative
+project_name:
+    value: mathematical_reasoning_transformers
+results_dir:
+    value: results
+scheduler_t0:
+    value: 1000
+tokenizer_name:
+    value: mistralai/Mistral-7B-v0.1
+use_wandb:
+    value: true
+weight_decay:
+    value: 0.01

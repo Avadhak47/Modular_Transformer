@@ -56,9 +56,12 @@ class TransformerTrainer:
     def __init__(self, config: ExperimentConfig):
         self.config = config
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
+        self.model = TransformerModel(config.model.__dict__)
+        if torch.cuda.device_count() > 1:
+            print("Using", torch.cuda.device_count(), "GPUs!")
+            self.model = nn.DataParallel(self.model)
         # Initialize model
-        self.model = TransformerModel(config.model.__dict__).to(self.device)
+        self.model = self.model.to(self.device)
         
         # Initialize optimizer
         self.optimizer = get_optimizer(self.model, config.training)
@@ -103,6 +106,9 @@ class TransformerTrainer:
         tgt = batch['tgt'].to(self.device)
         
         # Create input and target sequences
+        # Guard against short sequences
+        if tgt.size(1) < 2:
+            raise ValueError("Target sequence too short for teacher forcing (must be at least 2 timesteps)")
         tgt_input = tgt[:, :-1]
         tgt_output = tgt[:, 1:]
         
@@ -141,6 +147,9 @@ class TransformerTrainer:
                 tgt = batch['tgt'].to(self.device)
                 tgt_input = tgt[:, :-1]
                 tgt_output = tgt[:, 1:]
+                # Guard against short sequences
+                if tgt.size(1) < 2:
+                    raise ValueError("Target sequence too short for teacher forcing (must be at least 2 timesteps)")
 
                 logits = self.model(src, tgt_input)
                 loss = self.criterion(logits.reshape(-1, logits.size(-1)), tgt_output.reshape(-1))
@@ -362,36 +371,39 @@ def main():
                        help='Use Weights & Biases for logging')
     parser.add_argument('--experiment_name', type=str, default=None,
                        help='Experiment name for logging')
-    
+    parser.add_argument('--model_size', type=str, default='small', choices=['small', 'medium', 'large'],
+                       help='Model size preset (small, medium, large)')
+
     args = parser.parse_args()
-    
+
     # Load configuration
     if args.config:
         config = ExperimentConfig.load(args.config)
     else:
-        config = get_config(args.pe_type)
-    
+        from config import get_config
+        config = get_config(args.pe_type, model_size=args.model_size)
+
     # Override with command line arguments
     config.training.batch_size = args.batch_size
     config.training.learning_rate = args.lr
-    # config.training.max_steps = args.epochs * 1000  # Approximate steps per epoch
+    config.training.max_steps = args.epochs * 1000  # Approximate steps per epoch
     config.training.use_wandb = args.wandb
-    
+
     if args.experiment_name:
         config.training.experiment_name = args.experiment_name
     else:
-        config.training.experiment_name = f"transformer_{args.pe_type}"
-    
+        config.training.experiment_name = f"transformer_{args.pe_type}_{args.model_size}"
+
     # Create trainer
     trainer = TransformerTrainer(config)
-    
+
     # Load checkpoint if resuming
     if args.resume:
         trainer.load_checkpoint(args.resume)
-    
+
     # Create data loaders
     train_loader, val_loader = create_data_loaders(config)
-    
+
     # Start training
     try:
         trainer.train(train_loader, val_loader)

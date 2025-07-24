@@ -1,0 +1,68 @@
+WandB initialized successfully
+Starting training...
+2025-07-16 05:18:26,332 - INFO - Starting mathematical reasoning training...
+2025-07-16 05:18:26,333 - INFO - Loading MATH and GSM8K datasets...
+=== Loading Datasets ===
+Loading GSM8K dataset...
+2025-07-16 05:18:32,207 - INFO - Successfully loaded GSM8K train split with 7473 examples
+GSM8K sample item keys: ['question', 'answer']
+GSM8K sample item: {'question': 'Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?', 'answer': 'Natalia sold 48/2 = <<48/2=24>>24 clips in May.\nNatalia sold 48+24 = <<48+24=72>>72 clips altogether in April and May.\n#### 72'}
+2025-07-16 05:18:32,568 - INFO - Successfully processed 7473 GSM8K problems
+2025-07-16 05:18:36,164 - INFO - Successfully loaded GSM8K test split with 1319 examples
+GSM8K sample item keys: ['question', 'answer']
+GSM8K sample item: {'question': "Janet’s ducks lay 16 eggs per day. She eats three for breakfast every morning and bakes muffins for her friends every day with four. She sells the remainder at the farmers' market daily for $2 per fresh duck egg. How much in dollars does she make every day at the farmers' market?", 'answer': 'Janet sells 16 - 3 - 4 = <<16-3-4=9>>9 duck eggs a day.\nShe makes 9 * 2 = $<<9*2=18>>18 every day at the farmer’s market.\n#### 18'}
+2025-07-16 05:18:36,222 - INFO - Successfully processed 1319 GSM8K problems
+✓ GSM8K train loaded: 7473 problems
+✓ GSM8K test loaded: 1319 problems
+Loading MATH dataset...
+2025-07-16 05:18:40,902 - INFO - Successfully loaded MATH dataset from Dahoas/MATH (train) with 7500 examples
+MATH sample item keys: ['problem', 'level', 'type', 'solution']
+MATH sample item: {'problem': 'Let \\[f(x) = \\left\\{\n\\begin{array}{cl} ax+3, &\\text{ if }x>2, \\\\\nx-5 &\\text{ if } -2 \\le x \\le 2, \\\\\n2x-b &\\text{ if } x <-2.\n\\end{array}\n\\right.\\]Find $a+b$ if the piecewise function is continuous (which means that its graph can be drawn without lifting your pencil from the paper).', 'level': 'Level 5', 'type': 'Algebra', 'solution': 'For the piecewise function to be continuous, the cases must "meet" at $2$ and $-2$. For example, $ax+3$ and $x-5$ must be equal when $x=2$. This implies $a(2)+3=2-5$, which we solve to get $2a=-6 \\Rightarrow a=-3$. Similarly, $x-5$ and $2x-b$ must be equal when $x=-2$. Substituting, we get $-2-5=2(-2)-b$, which implies $b=3$. So $a+b=-3+3=\\boxed{0}$.'}
+2025-07-16 05:18:41,228 - INFO - Successfully processed 7500 MATH problems
+✓ MATH train loaded: 7500 problems
+Total training problems: 14973
+Total test problems: 1319
+Creating PyTorch datasets...
+Dataset initialized with 14973 problems
+Dataset initialized with 1319 problems
+✓ Train dataset size: 14973
+✓ Test dataset size: 1319
+Creating data loaders...
+✓ Train loader batches: 7487
+✓ Test loader batches: 330
+=== Dataset Loading Complete ===
+2025-07-16 05:18:41,230 - INFO -
+Epoch 1/10
+Training Epoch 1:   0%|                                                            | 0/7487 [00:10<?, ?it/s]
+Training error: Caught TypeError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 171, in collate
+    {
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 172, in <dictcomp>
+    key: collate(
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 240, in collate
+    raise TypeError(default_collate_err_msg_format.format(elem_type))
+TypeError: default_collate: batch must contain tensors, numpy arrays, numbers, dicts or lists; found <class 'data.math_dataset_loader.MathematicalProblem'>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/utils/data/_utils/worker.py", line 349, in _worker_loop
+    data = fetcher.fetch(index)  # type: ignore[possibly-undefined]
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/utils/data/_utils/fetch.py", line 55, in fetch
+    return self.collate_fn(data)
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 398, in default_collate
+    return collate(batch, collate_fn_map=default_collate_fn_map)
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 191, in collate
+    return {
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 192, in <dictcomp>
+    key: collate([d[key] for d in batch], collate_fn_map=collate_fn_map)
+  File "/Users/avadhesh/.pyenv/versions/3.10.17/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 240, in collate
+    raise TypeError(default_collate_err_msg_format.format(elem_type))
+TypeError: default_collate: batch must contain tensors, numpy arrays, numbers, dicts or lists; found <class 'data.math_dataset_loader.MathematicalProblem'>
+2025-07-16 05:18:51,857 - INFO - Evaluation history saved to results/evaluation_history_t5_relative.json
+2025-07-16 05:18:51,857 - INFO -
+Training completed!
+2025-07-16 05:18:51,858 - INFO - Best accuracy achieved: 0.0000
+
+Training completed!

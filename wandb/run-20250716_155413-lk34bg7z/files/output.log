@@ -1,0 +1,167 @@
+WandB initialized successfully
+Starting training...
+2025-07-16 15:54:15,024 - INFO - Starting mathematical reasoning training...
+2025-07-16 15:54:15,025 - INFO - Loading datasets from local files...
+=== Loading Datasets from Local Files ===
+✓ Local train loaded: 13475 problems
+✓ Local test loaded: 1498 problems
+Total training problems: 13475
+Total test problems: 1498
+Creating PyTorch datasets...
+Dataset initialized with 13475 problems
+Dataset initialized with 1498 problems
+✓ Train dataset size: 13475
+✓ Test dataset size: 1498
+Creating data loaders...
+✓ Train loader batches: 6738
+✓ Test loader batches: 375
+=== Dataset Loading Complete ===
+2025-07-16 15:54:15,265 - INFO -
+Epoch 1/1
+Training Epoch 1:   0%|                      | 4/6738 [00:51<21:20:31, 11.41s/it, loss=10.4083, lr=1.00e-04]
+Batch 0 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 1 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 2 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 3 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 4 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 5 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 6 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 7 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 8 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 9 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 10 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 11 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 12 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 13 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 14 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 15 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 16 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 17 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 18 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 19 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])
+  outputs: torch.Size([2, 1024, 32000])
+Batch 20 shapes:
+  input_ids: torch.Size([2, 1024])
+  attention_mask: torch.Size([2, 1024])
+  labels: torch.Size([2, 1024])
+  decoder_input: torch.Size([2, 1024])
+  target_labels: torch.Size([2, 1024])

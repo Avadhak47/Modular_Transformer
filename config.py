@@ -29,6 +29,7 @@ class TrainingConfig:
     eval_interval: int = 1000
     save_interval: int = 5000
     patience: int = 5
+    tokenizer_name: str = 'mistralai/Mistral-7B-v0.1'
 
 
 @dataclass
@@ -66,42 +67,41 @@ class ExperimentConfig:
         return cls.from_dict(config_dict)
 
 
-def get_config(pe_type: str = "sinusoidal") -> ExperimentConfig:
+def get_config(pe_type: str = "sinusoidal", model_size: str = "small") -> ExperimentConfig:
     """
-    Get configuration for a specific positional encoding type.
-    
+    Get configuration for a specific positional encoding type and model size.
     Args:
         pe_type: Positional encoding type
-        
+        model_size: Model size preset ('small', 'medium', 'large')
     Returns:
         ExperimentConfig with model and training settings
     """
-    # Create model config with specified positional encoding
-    model_config = ModelConfig(positional_encoding=pe_type)
-    
+    # Create model config with specified positional encoding and size
+    model_config = ModelConfig.get_preset(model_size, positional_encoding=pe_type)
+
     # Create training config
     training_config = TrainingConfig()
-    
+
     # Customize training config based on positional encoding
     if pe_type == "rope":
         training_config.learning_rate = 1e-4
-        training_config.experiment_name = f"transformer_rope"
+        training_config.experiment_name = f"transformer_rope_{model_size}"
     elif pe_type == "alibi":
         training_config.learning_rate = 1e-4
-        training_config.experiment_name = f"transformer_alibi"
+        training_config.experiment_name = f"transformer_alibi_{model_size}"
     elif pe_type == "diet":
         training_config.learning_rate = 1e-4
-        training_config.experiment_name = f"transformer_diet"
+        training_config.experiment_name = f"transformer_diet_{model_size}"
     elif pe_type == "t5_relative":
         training_config.learning_rate = 1e-4
-        training_config.experiment_name = f"transformer_t5_relative"
+        training_config.experiment_name = f"transformer_t5_relative_{model_size}"
     elif pe_type == "nope":
         training_config.learning_rate = 1e-4
-        training_config.experiment_name = f"transformer_nope"
+        training_config.experiment_name = f"transformer_nope_{model_size}"
     else:  # sinusoidal
         training_config.learning_rate = 1e-4
-        training_config.experiment_name = f"transformer_sinusoidal"
-    
+        training_config.experiment_name = f"transformer_sinusoidal_{model_size}"
+
     return ExperimentConfig(model=model_config, training=training_config)
 
 
