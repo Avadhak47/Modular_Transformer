@@ -673,6 +673,11 @@ Solution: {solution}"""
             max_length=self.max_length,
             return_tensors="pt"
         )
+        # Warn if truncation occurred
+        if hasattr(encoding, 'num_truncated_tokens') and encoding.num_truncated_tokens > 0:
+            logger.warning(f"Truncation occurred for problem: {problem_obj.problem[:60]}...")
+        elif encoding['input_ids'].shape[-1] >= self.max_length:
+            logger.warning(f"Truncation likely occurred for problem: {problem_obj.problem[:60]}...")
         
         result = {
             'input_ids': encoding['input_ids'].squeeze(),

@@ -9,7 +9,8 @@ PE_METHOD="rope"
 NODE_ID=0
 EXPERIMENT_NAME="pe_comparison_$(date +%Y%m%d_%H%M%S)"
 BASE_MODEL="deepseek-ai/deepseek-math-7b-instruct"
-DATASETS="math,gsm8k,openmath_instruct"
+# Default to GSM8K and MATH datasets for mathematical reasoning
+DATASETS="gsm8k,math,openmath_instruct"
 MAX_STEPS=5000
 BATCH_SIZE=4
 LEARNING_RATE=2e-5
@@ -18,8 +19,16 @@ EVAL_STEPS=250
 MAX_LENGTH=4096
 USE_LORA=true
 LOAD_IN_4BIT=true
+# Default output dir (overridden for Kaggle below)
 OUTPUT_DIR="/scratch/$USER/math_pe_research"
 WANDB_PROJECT="math_pe_research"
+
+# --- Kaggle Environment Detection and Path Fix ---
+# If running on Kaggle, set output dir to /kaggle/working and input dir to /kaggle/input
+if [ -d "/kaggle/working" ] && [ -d "/kaggle/input" ]; then
+    echo "[INFO] Detected Kaggle environment. Setting output and cache directories to /kaggle/working."
+    OUTPUT_DIR="/kaggle/working/math_pe_research"
+fi
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -178,6 +187,8 @@ mkdir -p "$HF_DATASETS_CACHE"
 EXPERIMENT_CONFIG="$EXPERIMENT_DIR/experiment_config.json"
 log "Creating experiment configuration: $EXPERIMENT_CONFIG"
 
+CACHE_DIR="$OUTPUT_DIR/data_cache"
+
 cat > "$EXPERIMENT_CONFIG" << EOF
 {
   "experiment_name": "$EXPERIMENT_NAME",
@@ -185,6 +196,7 @@ cat > "$EXPERIMENT_CONFIG" << EOF
   "pe_method": "$PE_METHOD",
   "base_model": "$BASE_MODEL",
   "datasets": "$DATASETS",
+  "cache_dir": "$CACHE_DIR",
   "training_config": {
     "max_steps": $MAX_STEPS,
     "batch_size": $BATCH_SIZE,
@@ -301,7 +313,8 @@ def main():
     
     data_loader = MathDatasetLoader(
         tokenizer=tokenizer,
-        max_length=config['training_config']['max_length']
+        max_length=config['training_config']['max_length'],
+        cache_dir=Path(config['cache_dir'])
     )
     
     # Load training data
