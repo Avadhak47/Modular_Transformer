@@ -156,6 +156,14 @@ class ALiBiPositionalEncoding(nn.Module):
         """Get the ALiBi slopes for analysis."""
         return self.slopes
 
+    def to(self, device):
+        super().to(device)
+        if hasattr(self, 'slopes'):
+            self.slopes = self.slopes.to(device)
+        if hasattr(self, 'alibi_bias'):
+            self.alibi_bias = self.alibi_bias.to(device)
+        return self
+
 
 class MathematicalALiBi(ALiBiPositionalEncoding):
     """
@@ -219,6 +227,14 @@ class MathematicalALiBi(ALiBiPositionalEncoding):
         
         operator_mask = torch.isin(token_ids, operator_tokens)
         return operator_mask
+
+    def to(self, device):
+        super().to(device)
+        if hasattr(self, 'math_slope_adjustment'):
+            self.math_slope_adjustment = self.math_slope_adjustment.to(device)
+        if hasattr(self, 'operator_bias_scale'):
+            self.operator_bias_scale = self.operator_bias_scale.to(device)
+        return self
 
 
 # Factory function

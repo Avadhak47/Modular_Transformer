@@ -92,3 +92,9 @@ class SinusoidalPositionalEncoding(nn.Module):
         
         # Apply scaling and add to input
         return self.dropout(x + self.scale.to(x.device) * pe)
+
+    def to(self, device):
+        super().to(device)
+        if hasattr(self, 'scale'):
+            self.scale = self.scale.to(device)
+        return self

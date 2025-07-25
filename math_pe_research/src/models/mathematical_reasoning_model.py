@@ -37,6 +37,19 @@ from positional_encoding import get_positional_encoding, PE_REGISTRY
 logger = logging.getLogger(__name__)
 
 
+def get_best_device():
+    if torch.cuda.is_available():
+        n_gpus = torch.cuda.device_count()
+        if n_gpus > 1:
+            print(f"Using {n_gpus} GPUs: {[torch.cuda.get_device_name(i) for i in range(n_gpus)]}")
+        else:
+            print(f"Using single GPU: {torch.cuda.get_device_name(0)}")
+        return torch.device("cuda")
+    else:
+        print("Using CPU")
+        return torch.device("cpu")
+
+
 class MathematicalReasoningModel(nn.Module):
     """
     Mathematical Reasoning Model with configurable positional encoding.
@@ -502,9 +515,12 @@ class MathematicalReasoningModel(nn.Module):
     ) -> Dict[str, torch.Tensor]:
         """Forward pass through the model."""
         
-        # Prepare inputs
-        if attention_mask is None:
-            attention_mask = torch.ones_like(input_ids)
+        device = next(self.parameters()).device
+        input_ids = input_ids.to(device)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(device)
+        if labels is not None:
+            labels = labels.to(device)
         
         # Forward through base model
         outputs = self.base_model(
@@ -529,6 +545,11 @@ class MathematicalReasoningModel(nn.Module):
         **kwargs
     ) -> torch.Tensor:
         """Generate mathematical reasoning solutions."""
+        
+        device = next(self.parameters()).device
+        input_ids = input_ids.to(device)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(device)
         
         if pad_token_id is None:
             pad_token_id = self.tokenizer.pad_token_id
@@ -950,11 +971,21 @@ def create_mathematical_reasoning_model(
     if pe_method not in PE_REGISTRY:
         raise ValueError(f"Unknown PE method: {pe_method}. Available: {list(PE_REGISTRY.keys())}")
     
-    return MathematicalReasoningModel(
+    device = get_best_device()
+    model = MathematicalReasoningModel(
         base_model_name=base_model,
         pe_method=pe_method,
-        **kwargs  # Remove explicit cache_dir to avoid duplication
+        **kwargs
     )
+    # Move PE layer to device
+    if hasattr(model, 'pe_layer') and hasattr(model.pe_layer, 'to'):
+        model.pe_layer = model.pe_layer.to(device)
+    # Move model to device
+    model = model.to(device)
+    # Wrap with DataParallel if multiple GPUs
+    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        model = torch.nn.DataParallel(model)
+    return model
 
 
 if __name__ == "__main__":

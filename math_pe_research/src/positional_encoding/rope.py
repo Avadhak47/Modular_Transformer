@@ -84,39 +84,18 @@ class RotaryPositionalEmbedding(nn.Module):
         return inv_freq
     
     def _get_cos_sin(self, seq_len: int, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Get or compute cos/sin values for given sequence length."""
-        if self.use_cache and seq_len <= self._cached_seq_len and self._cached_cos is not None:
-            return self._cached_cos[:seq_len], self._cached_sin[:seq_len]
-        
-        # Generate position indices
+        """Compute cos/sin matrices for RoPE."""
         positions = torch.arange(seq_len, device=device, dtype=torch.float32)
-        positions = positions * self.scaling_factor
-        
-        # Apply mathematical enhancement if enabled
-        if self.math_enhanced and hasattr(self, 'position_scaling'):
+        # Always move learned parameters to the correct device
+        if hasattr(self, 'position_scaling'):
             positions = positions * self.position_scaling.to(device)
-        
-        # Compute frequency matrix
         inv_freq = self.inv_freq.to(device)
-        if self.math_enhanced and hasattr(self, 'freq_enhancement'):
+        if hasattr(self, 'freq_enhancement'):
             inv_freq = inv_freq * self.freq_enhancement.to(device)
-        
-        # Compute outer product: positions × inv_freq
         freqs = torch.outer(positions, inv_freq)
-        
-        # Duplicate for sin/cos pairs
-        freqs = torch.cat([freqs, freqs], dim=-1)
-        
-        cos_vals = torch.cos(freqs)
-        sin_vals = torch.sin(freqs)
-        
-        # Cache values if enabled
-        if self.use_cache:
-            self._cached_cos = cos_vals
-            self._cached_sin = sin_vals
-            self._cached_seq_len = seq_len
-        
-        return cos_vals, sin_vals
+        cos = torch.cos(freqs)
+        sin = torch.sin(freqs)
+        return cos, sin
     
     def rotate_half(self, x: torch.Tensor) -> torch.Tensor:
         """Rotate half the dimensions of the input tensor."""
@@ -181,6 +160,16 @@ class RotaryPositionalEmbedding(nn.Module):
             self._cached_sin = None
             self._cached_seq_len = 0
 
+    def to(self, device):
+        super().to(device)
+        if hasattr(self, 'position_scaling'):
+            self.position_scaling = self.position_scaling.to(device)
+        if hasattr(self, 'freq_enhancement'):
+            self.freq_enhancement = self.freq_enhancement.to(device)
+        if hasattr(self, 'inv_freq'):
+            self.inv_freq = self.inv_freq.to(device)
+        return self
+
 
 class MathematicalRoPE(RotaryPositionalEmbedding):
     """
@@ -224,16 +213,29 @@ class MathematicalRoPE(RotaryPositionalEmbedding):
         positions = positions * self.scaling_factor * self.position_scaling.to(device)
         
         # Use adaptive frequencies
-        adapted_freq = self._compute_adaptive_freq(positions)
+        cos, sin = self._compute_adaptive_cos_sin(positions, device)
         
-        # Compute frequency matrix
-        freqs = torch.outer(positions, adapted_freq)
-        freqs = torch.cat([freqs, freqs], dim=-1)
-        
-        cos_vals = torch.cos(freqs)
-        sin_vals = torch.sin(freqs)
-        
-        return cos_vals, sin_vals
+        return cos, sin
+
+    def to(self, device):
+        super().to(device)
+        if hasattr(self, 'position_scaling'):
+            self.position_scaling = self.position_scaling.to(device)
+        if hasattr(self, 'freq_enhancement'):
+            self.freq_enhancement = self.freq_enhancement.to(device)
+        if hasattr(self, 'inv_freq'):
+            self.inv_freq = self.inv_freq.to(device)
+        if hasattr(self, 'mathematical_bias'):
+            self.mathematical_bias = self.mathematical_bias.to(device)
+        if hasattr(self, 'adaptive_scaling'):
+            self.adaptive_scaling = self.adaptive_scaling.to(device)
+        if hasattr(self, 'arithmetic_freq_mult'):
+            self.arithmetic_freq_mult = self.arithmetic_freq_mult.to(device)
+        if hasattr(self, 'algebraic_freq_mult'):
+            self.algebraic_freq_mult = self.algebraic_freq_mult.to(device)
+        if hasattr(self, 'geometric_freq_mult'):
+            self.geometric_freq_mult = self.geometric_freq_mult.to(device)
+        return self
 
 
 class LongSequenceRoPE(RotaryPositionalEmbedding):
@@ -264,9 +266,16 @@ class LongSequenceRoPE(RotaryPositionalEmbedding):
             inv_freq = inv_freq * self.freq_enhancement.to(device)
         
         freqs = torch.outer(positions, inv_freq)
-        freqs = torch.cat([freqs, freqs], dim=-1)
-        
-        cos_vals = torch.cos(freqs)
-        sin_vals = torch.sin(freqs)
-        
-        return cos_vals, sin_vals
+        cos = torch.cos(freqs)
+        sin = torch.sin(freqs)
+        return cos, sin
+
+    def to(self, device):
+        super().to(device)
+        if hasattr(self, 'position_scaling'):
+            self.position_scaling = self.position_scaling.to(device)
+        if hasattr(self, 'freq_enhancement'):
+            self.freq_enhancement = self.freq_enhancement.to(device)
+        if hasattr(self, 'inv_freq'):
+            self.inv_freq = self.inv_freq.to(device)
+        return self

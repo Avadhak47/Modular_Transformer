@@ -347,6 +347,30 @@ class MathAdaptivePositionalEncoding(nn.Module):
         
         return symbol_embeds * 0.1  # Scale down symbol contribution
 
+    def to(self, device):
+        super().to(device)
+        if hasattr(self, 'frequency_adjustments'):
+            self.frequency_adjustments = self.frequency_adjustments.to(device)
+        if hasattr(self, 'hierarchy_frequency_scales'):
+            self.hierarchy_frequency_scales = self.hierarchy_frequency_scales.to(device)
+        if hasattr(self, 'symbol_embeddings'):
+            self.symbol_embeddings = self.symbol_embeddings.to(device)
+        if hasattr(self, 'precedence_encoder'):
+            self.precedence_encoder = self.precedence_encoder.to(device)
+        if hasattr(self, 'hierarchy_encoder'):
+            self.hierarchy_encoder = self.hierarchy_encoder.to(device)
+        if hasattr(self, 'multiscale_encoder'):
+            self.multiscale_encoder = self.multiscale_encoder.to(device)
+        if hasattr(self, 'content_classifier'):
+            self.content_classifier = self.content_classifier.to(device)
+        if hasattr(self, 'combination_weights'):
+            self.combination_weights = self.combination_weights.to(device)
+        if hasattr(self, 'position_cache'):
+            self.position_cache = self.position_cache.to(device)
+        if hasattr(self, 'hierarchy_cache'):
+            self.hierarchy_cache = self.hierarchy_cache.to(device)
+        return self
+
 
 class OperatorPrecedenceEncoder(nn.Module):
     """Encodes operator precedence information into positional embeddings."""
@@ -397,6 +421,12 @@ class OperatorPrecedenceEncoder(nn.Module):
         
         return precedence_pos * 0.2  # Scale down precedence contribution
 
+    def to(self, device):
+        super().to(device)
+        if hasattr(self, 'precedence_embeddings'):
+            self.precedence_embeddings = self.precedence_embeddings.to(device)
+        return self
+
 
 class ExpressionHierarchyEncoder(nn.Module):
     """Encodes mathematical expression hierarchy into positional embeddings."""
@@ -443,6 +473,12 @@ class ExpressionHierarchyEncoder(nn.Module):
                 levels[b, i] = current_level
         
         return levels
+
+    def to(self, device):
+        super().to(device)
+        if hasattr(self, 'level_embeddings'):
+            self.level_embeddings = self.level_embeddings.to(device)
+        return self
 
 
 class MultiScalePositionEncoder(nn.Module):
@@ -493,6 +529,12 @@ class MultiScalePositionEncoder(nn.Module):
         
         return pe
 
+    def to(self, device):
+        super().to(device)
+        if hasattr(self, 'scale_weights'):
+            self.scale_weights = self.scale_weights.to(device)
+        return self
+
 
 class MathContentClassifier(nn.Module):
     """Classifies mathematical content for adaptive encoding."""
@@ -504,6 +546,12 @@ class MathContentClassifier(nn.Module):
     def forward(self, embeddings: torch.Tensor) -> torch.Tensor:
         """Classify mathematical content types."""
         return F.softmax(self.classifier(embeddings), dim=-1)
+
+    def to(self, device):
+        super().to(device)
+        if hasattr(self, 'classifier'):
+            self.classifier = self.classifier.to(device)
+        return self
 
 
 if __name__ == "__main__":

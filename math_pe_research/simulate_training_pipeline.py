@@ -15,7 +15,7 @@ from dataclasses import dataclass
 # Add the src directory to the path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
-from models.mathematical_reasoning_model import create_mathematical_reasoning_model
+from models.mathematical_reasoning_model import create_mathematical_reasoning_model, get_best_device
 
 
 @dataclass
@@ -172,7 +172,7 @@ class TrainingSimulator:
     def setup_model(self):
         """Initialize the model with the specified PE method."""
         print(f"🔧 Setting up model with {self.pe_method.upper()} PE...")
-        
+        self.device = get_best_device()
         try:
             self.model = create_mathematical_reasoning_model(
                 pe_method=self.pe_method,
@@ -182,13 +182,10 @@ class TrainingSimulator:
                 torch_dtype=torch.float32,
                 device_map="auto" if torch.cuda.is_available() else "cpu"
             )
-            
             self.tokenizer = self.model.tokenizer
-            
             print(f"✅ Model created successfully with {self.pe_method} PE")
-            print(f"   Device: {next(self.model.parameters()).device}")
+            print(f"   Device: {next(self.model.parameters()).device if not hasattr(self.model, 'module') else next(self.model.module.parameters()).device}")
             print(f"   Parameters: {sum(p.numel() for p in self.model.parameters()):,}")
-            
         except Exception as e:
             print(f"❌ Failed to create model: {e}")
             raise
@@ -196,28 +193,20 @@ class TrainingSimulator:
     def test_forward_pass(self, problem: MathProblem) -> Dict[str, Any]:
         """Test forward pass with a mathematical problem."""
         try:
-            # Tokenize the problem
             input_text = f"Solve: {problem.problem}"
             input_ids = self.tokenizer.encode(input_text, return_tensors="pt")
-            
-            if torch.cuda.is_available():
-                input_ids = input_ids.to(self.device)
-            
-            # Time the forward pass
+            device = next(self.model.parameters()).device if not hasattr(self.model, 'module') else next(self.model.module.parameters()).device
+            input_ids = input_ids.to(device)
             start_time = time.time()
-            
             with torch.no_grad():
                 outputs = self.model(input_ids=input_ids)
-            
             forward_time = time.time() - start_time
-            
             return {
                 "success": True,
                 "forward_time": forward_time,
                 "output_shape": outputs['logits'].shape,
                 "device": outputs['logits'].device
             }
-            
         except Exception as e:
             return {
                 "success": False,
@@ -228,28 +217,19 @@ class TrainingSimulator:
     def test_generation(self, problem: MathProblem) -> Dict[str, Any]:
         """Test text generation with a mathematical problem."""
         try:
-            # Tokenize the problem
             input_text = f"Solve: {problem.problem}"
             input_ids = self.tokenizer.encode(input_text, return_tensors="pt")
-            
-            if torch.cuda.is_available():
-                input_ids = input_ids.to(self.device)
-            
-            # Time the generation
+            device = next(self.model.parameters()).device if not hasattr(self.model, 'module') else next(self.model.module.parameters()).device
+            input_ids = input_ids.to(device)
             start_time = time.time()
-            
             generated = self.model.generate(
                 input_ids=input_ids,
                 max_length=100,
                 do_sample=False,
                 pad_token_id=self.tokenizer.eos_token_id
             )
-            
             generation_time = time.time() - start_time
-            
-            # Decode the generated text
             generated_text = self.tokenizer.decode(generated[0], skip_special_tokens=True)
-            
             return {
                 "success": True,
                 "generation_time": generation_time,
@@ -257,7 +237,6 @@ class TrainingSimulator:
                 "input_length": input_ids.shape[1],
                 "output_length": generated.shape[1]
             }
-            
         except Exception as e:
             return {
                 "success": False,

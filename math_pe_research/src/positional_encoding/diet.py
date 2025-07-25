@@ -74,3 +74,9 @@ class DIETPositionalEncoding(nn.Module):
         pe_dynamic = self.position_transform(pe)
         
         return self.dropout(x + pe_dynamic)
+
+    def to(self, device):
+        super().to(device)
+        if hasattr(self, 'position_transform'):
+            self.position_transform = self.position_transform.to(device)
+        return self
