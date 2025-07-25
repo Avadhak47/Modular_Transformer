@@ -550,26 +550,38 @@ class MathematicalReasoningModel(nn.Module):
         return None, None
     
     def _initialize_pe_parameters(self, pe_layer, layer_idx):
-        """Initialize PE parameters with unique names to avoid sharing."""
-        # Create a deep copy of all parameters to ensure no sharing
+        """Initialize PE parameters with unique names to avoid sharing, and ensure tensor size consistency."""
+        # Remove all old parameters and buffers to avoid shared tensors
         for name, param in list(pe_layer.named_parameters()):
-            if not name.startswith(f'{name}_layer_') and not name.endswith(f'_layer_{layer_idx}'):
-                # Create a new parameter with unique name
-                new_param = nn.Parameter(param.data.clone().detach())
-                pe_layer.register_parameter(f'{name}_layer_{layer_idx}', new_param)
-                # Remove the old shared parameter
+            if name in pe_layer._parameters:
+                del pe_layer._parameters[name]
+            if hasattr(pe_layer, name):
                 delattr(pe_layer, name)
-                setattr(pe_layer, name, new_param)
-        
-        # Handle buffers (like inv_freq)
+            new_param = nn.Parameter(param.data.clone().detach())
+            unique_name = f'{name}_layer_{layer_idx}'
+            pe_layer.register_parameter(unique_name, new_param)
+            setattr(pe_layer, unique_name, new_param)
+            # Set canonical attribute for code compatibility
+            setattr(pe_layer, name, new_param)
         for name, buffer in list(pe_layer.named_buffers()):
-            if not name.startswith(f'{name}_layer_') and not name.endswith(f'_layer_{layer_idx}'):
-                # Create a new buffer with unique name
-                new_buffer = buffer.data.clone().detach()
-                pe_layer.register_buffer(f'{name}_layer_{layer_idx}', new_buffer)
-                # Remove the old shared buffer
+            if name in pe_layer._buffers:
+                del pe_layer._buffers[name]
+            if hasattr(pe_layer, name):
                 delattr(pe_layer, name)
-                setattr(pe_layer, name, new_buffer)
+            new_buffer = buffer.data.clone().detach()
+            unique_name = f'{name}_layer_{layer_idx}'
+            pe_layer.register_buffer(unique_name, new_buffer)
+            setattr(pe_layer, unique_name, new_buffer)
+            # Set canonical attribute for code compatibility
+            setattr(pe_layer, name, new_buffer)
+        # Ensure input/output tensor size consistency for PE
+        if hasattr(pe_layer, 'd_model') and hasattr(self, 'config'):
+            pe_layer.d_model = self.config.hidden_size
+        if hasattr(pe_layer, 'dim') and hasattr(self, 'config'):
+            num_heads = getattr(self.config, 'num_attention_heads', 8)
+            pe_layer.dim = self.config.hidden_size // num_heads
+        if hasattr(pe_layer, 'max_seq_len') and hasattr(self, 'config'):
+            pe_layer.max_seq_len = getattr(self.config, 'max_position_embeddings', 8192)
 
     def forward(
         self,

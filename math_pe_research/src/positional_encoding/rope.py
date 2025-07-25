@@ -111,17 +111,19 @@ class RotaryPositionalEmbedding(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # q, k: [batch, num_heads, seq_len, head_dim]
         # cos, sin: [seq_len, head_dim] or [seq_len, head_dim//2]
-        # Ensure cos/sin match q/k's last dimension
-        if cos.shape[-1] != q.shape[-1]:
-            if q.shape[-1] % cos.shape[-1] == 0:
-                repeat_factor = q.shape[-1] // cos.shape[-1]
-                cos = cos.repeat_interleave(repeat_factor, dim=-1)
-                sin = sin.repeat_interleave(repeat_factor, dim=-1)
+        seq_len = q.shape[2]
+        head_dim = q.shape[3]
+        # Expand cos/sin to [seq_len, head_dim] if needed
+        if cos.shape[-1] != head_dim:
+            if head_dim % cos.shape[-1] == 0:
+                repeat_factor = head_dim // cos.shape[-1]
+                cos = cos.repeat(1, repeat_factor)
+                sin = sin.repeat(1, repeat_factor)
             else:
-                # If not divisible, expand to match
-                cos = cos.expand(-1, q.shape[-1])
-                sin = sin.expand(-1, q.shape[-1])
-        # Now cos/sin should match q's last dimension
+                cos = cos.expand(seq_len, head_dim)
+                sin = sin.expand(seq_len, head_dim)
+        cos = cos.unsqueeze(0).unsqueeze(0)  # [1, 1, seq_len, head_dim]
+        sin = sin.unsqueeze(0).unsqueeze(0)
         q_embed = (q * cos) + (self.rotate_half(q) * sin)
         k_embed = (k * cos) + (self.rotate_half(k) * sin)
         return q_embed, k_embed
