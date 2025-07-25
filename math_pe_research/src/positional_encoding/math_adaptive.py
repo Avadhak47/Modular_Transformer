@@ -289,6 +289,13 @@ class MathAdaptivePositionalEncoding(nn.Module):
         weights = F.softmax(self.combination_weights.to(device), dim=0)
         combined_pos = sum(w * comp for w, comp in zip(weights, components))
         
+        # Ensure combined_pos matches x's last dimension
+        if combined_pos.shape[-1] != d_model:
+            if d_model % combined_pos.shape[-1] == 0:
+                repeat_factor = d_model // combined_pos.shape[-1]
+                combined_pos = combined_pos.repeat(1, 1, repeat_factor)
+            else:
+                combined_pos = combined_pos.expand(batch_size, seq_len, d_model)
         # Add to input embeddings
         return x + combined_pos
     

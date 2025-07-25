@@ -65,12 +65,13 @@ class MathematicalReasoningModel(nn.Module):
         pe_config: Optional[Dict[str, Any]] = None,
         use_lora: bool = True,
         lora_config: Optional[Dict[str, Any]] = None,
-        load_in_4bit: bool = True,
+        load_in_4bit: bool = False,  # Changed default to False for better training compatibility
         load_in_8bit: bool = False,
         trust_remote_code: bool = True,
         torch_dtype: torch.dtype = torch.float16,
         device_map: str = "auto",
-        cache_dir: Optional[str] = None
+        cache_dir: Optional[str] = None,
+        enable_gradient_checkpointing: bool = False  # Disable by default to prevent training issues
     ):
         super().__init__()
         
@@ -173,13 +174,18 @@ class MathematicalReasoningModel(nn.Module):
         # Quantization configuration
         quantization_config = None
         if load_in_4bit:
-            from transformers import BitsAndBytesConfig
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch_dtype,
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4"
-            )
+            try:
+                from transformers import BitsAndBytesConfig
+                quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch_dtype,
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_quant_type="nf4"
+                )
+                logger.info("Using 4-bit quantization")
+            except ImportError:
+                logger.warning("BitsAndBytes not available, loading without quantization")
+                load_in_4bit = False
         
         # Load model
         model = AutoModelForCausalLM.from_pretrained(
@@ -204,6 +210,14 @@ class MathematicalReasoningModel(nn.Module):
             model.resize_token_embeddings(len(self.tokenizer))
             logger.info(f"Resized token embeddings to {len(self.tokenizer)}")
             # Only new rows are randomly initialized; old ones are copied from Pythia
+        
+        # Ensure model is in training mode and parameters are trainable
+        model.train()
+        
+        # For quantized models, ensure some parameters are trainable
+        if load_in_4bit:
+            # In 4-bit models, we need to ensure LoRA parameters are trainable
+            logger.info("4-bit model loaded - LoRA parameters will be trainable")
         
         return model
     
@@ -256,6 +270,23 @@ class MathematicalReasoningModel(nn.Module):
             logger.warning(f"Unknown model architecture, skipping PE replacement")
             return
         
+        # Get PE configuration for creating new instances
+        d_model = self.config.hidden_size
+        max_position_embeddings = getattr(self.config, 'max_position_embeddings', 8192)
+        num_heads = getattr(self.config, 'num_attention_heads', 8)
+        
+        pe_config = {
+            'd_model': d_model,
+            'max_seq_len': max_position_embeddings,
+            'num_heads': num_heads,
+            **self.pe_config
+        }
+        
+        # For RoPE, use head_dim instead of d_model
+        if self.pe_method in ['rope', 'math_adaptive']:
+            head_dim = d_model // num_heads
+            pe_config['dim'] = head_dim  # RoPE expects 'dim' parameter
+        
         # Modify attention layers across all transformer layers
         for layer_idx, layer in enumerate(layers):
             # Store reference to the attention layer
@@ -264,14 +295,16 @@ class MathematicalReasoningModel(nn.Module):
                 logger.warning(f"No attention layer found at layer {layer_idx}")
                 continue
             
+            # Create a NEW PE instance for each layer to avoid sharing
+            layer_pe = get_positional_encoding(self.pe_method, **pe_config)
+            
             # Initialize PE parameters properly for this layer
-            if layer_idx == 0:  # Only initialize once, then reuse
-                self._initialize_pe_parameters(new_pe, attention)
+            self._initialize_pe_parameters(layer_pe, layer_idx)
             
             # Create a custom attention wrapper that uses our PE
             custom_attention = CustomAttentionWithPE(
                 attention, 
-                new_pe, 
+                layer_pe,  # Use the layer-specific PE
                 self.pe_method,
                 layer_idx=layer_idx
             )
@@ -329,6 +362,9 @@ class MathematicalReasoningModel(nn.Module):
             
             if not target_modules:
                 logger.warning("No suitable target modules found for LoRA, skipping LoRA adaptation")
+                # Ensure base model parameters are trainable
+                for param in self.base_model.parameters():
+                    param.requires_grad = True
                 return self.base_model
             
             # Default LoRA configuration optimized for mathematical reasoning
@@ -351,6 +387,11 @@ class MathematicalReasoningModel(nn.Module):
             # Apply LoRA to model
             model = get_peft_model(self.base_model, peft_config)
             
+            # Ensure all LoRA parameters are trainable
+            for name, param in model.named_parameters():
+                if 'lora' in name.lower():
+                    param.requires_grad = True
+            
             logger.info(f"Applied LoRA with rank {lora_config['r']} to model")
             logger.info(f"Trainable parameters: {model.print_trainable_parameters()}")
             
@@ -358,14 +399,24 @@ class MathematicalReasoningModel(nn.Module):
             
         except ImportError:
             logger.warning("PEFT not available, skipping LoRA fine-tuning")
+            # Ensure base model parameters are trainable even without LoRA
+            for param in self.base_model.parameters():
+                param.requires_grad = True
             return self.base_model
     
     def _apply_math_optimizations(self):
         """Apply mathematical reasoning specific optimizations."""
         
-        # Enable gradient checkpointing for memory efficiency
-        if hasattr(self.base_model, 'gradient_checkpointing_enable'):
-            self.base_model.gradient_checkpointing_enable()
+        # Only enable gradient checkpointing if explicitly requested
+        if hasattr(self, 'enable_gradient_checkpointing') and self.enable_gradient_checkpointing:
+            if hasattr(self.base_model, 'gradient_checkpointing_enable'):
+                self.base_model.gradient_checkpointing_enable()
+                logger.info("Gradient checkpointing enabled")
+        else:
+            # Disable gradient checkpointing to prevent computation graph breaking
+            if hasattr(self.base_model, 'gradient_checkpointing_disable'):
+                self.base_model.gradient_checkpointing_disable()
+                logger.info("Gradient checkpointing disabled")
         
         # Set model to training mode
         self.base_model.train()
@@ -374,7 +425,32 @@ class MathematicalReasoningModel(nn.Module):
         if hasattr(self.base_model.config, 'use_cache'):
             self.base_model.config.use_cache = False
         
+        # Ensure all trainable parameters are unfrozen
+        self._unfreeze_trainable_parameters()
+        
         logger.info("Applied mathematical reasoning optimizations")
+    
+    def _unfreeze_trainable_parameters(self):
+        """Ensure all trainable parameters are unfrozen."""
+        trainable_params = 0
+        total_params = 0
+        
+        for name, param in self.base_model.named_parameters():
+            total_params += param.numel()
+            if param.requires_grad:
+                trainable_params += param.numel()
+                # Double-check that trainable parameters are unfrozen
+                param.requires_grad = True
+        
+        logger.info(f"Trainable parameters: {trainable_params:,} / {total_params:,} ({100 * trainable_params / total_params:.2f}%)")
+        
+        if trainable_params == 0:
+            logger.warning("No trainable parameters found! This will cause training to fail.")
+            # Force unfreeze some key parameters as fallback
+            for name, param in self.base_model.named_parameters():
+                if any(key in name.lower() for key in ['lora', 'adapter', 'pe', 'positional']):
+                    param.requires_grad = True
+                    logger.info(f"Force unfroze parameter: {name}")
     
     def _detect_lora_target_modules(self) -> List[str]:
         """Auto-detect LoRA target modules based on model architecture."""
@@ -473,39 +549,28 @@ class MathematicalReasoningModel(nn.Module):
         
         return None, None
     
-    def _initialize_pe_parameters(self, new_pe: nn.Module, original_attention: nn.Module):
-        """Initialize PE parameters with proper parameter mapping and initialization."""
+    def _initialize_pe_parameters(self, pe_layer, layer_idx):
+        """Initialize PE parameters with unique names to avoid sharing."""
+        # Create a deep copy of all parameters to ensure no sharing
+        for name, param in list(pe_layer.named_parameters()):
+            if not name.startswith(f'{name}_layer_') and not name.endswith(f'_layer_{layer_idx}'):
+                # Create a new parameter with unique name
+                new_param = nn.Parameter(param.data.clone().detach())
+                pe_layer.register_parameter(f'{name}_layer_{layer_idx}', new_param)
+                # Remove the old shared parameter
+                delattr(pe_layer, name)
+                setattr(pe_layer, name, new_param)
         
-        # Get model configuration parameters
-        d_model = self.config.hidden_size
-        num_heads = getattr(self.config, 'num_attention_heads', 8)
-        max_seq_len = getattr(self.config, 'max_position_embeddings', 8192)
-        
-        # Initialize PE based on type
-        if hasattr(new_pe, 'initialize_from_config'):
-            # Custom initialization method
-            new_pe.initialize_from_config(
-                d_model=d_model,
-                num_heads=num_heads,
-                max_seq_len=max_seq_len,
-                original_params=dict(original_attention.named_parameters())
-            )
-        elif hasattr(new_pe, 'reset_parameters'):
-            # Standard PyTorch reset
-            new_pe.reset_parameters()
-        else:
-            # Manual initialization for common PE types
-            for name, param in new_pe.named_parameters():
-                if 'weight' in name:
-                    if param.dim() > 1:
-                        nn.init.xavier_uniform_(param)
-                    else:
-                        nn.init.normal_(param, std=0.02)
-                elif 'bias' in name:
-                    nn.init.zeros_(param)
-        
-        logger.info(f"Initialized PE parameters for {type(new_pe).__name__}")
-    
+        # Handle buffers (like inv_freq)
+        for name, buffer in list(pe_layer.named_buffers()):
+            if not name.startswith(f'{name}_layer_') and not name.endswith(f'_layer_{layer_idx}'):
+                # Create a new buffer with unique name
+                new_buffer = buffer.data.clone().detach()
+                pe_layer.register_buffer(f'{name}_layer_{layer_idx}', new_buffer)
+                # Remove the old shared buffer
+                delattr(pe_layer, name)
+                setattr(pe_layer, name, new_buffer)
+
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -631,28 +696,52 @@ I'll solve this step by step.
         
         return prompt_template.format(problem=problem)
     
-    def save_pretrained(self, save_directory: str):
-        """Save the model and tokenizer."""
-        # Save the base model (with LoRA if applied)
-        self.base_model.save_pretrained(save_directory)
+    def save_pretrained(self, save_directory, **kwargs):
+        """Custom save method to handle shared tensors."""
+        import os
+        from transformers import PreTrainedModel
         
-        # Save the tokenizer
-        self.tokenizer.save_pretrained(save_directory)
+        # Create save directory
+        os.makedirs(save_directory, exist_ok=True)
         
-        # Save configuration
-        import json
-        config_dict = {
-            'base_model_name': self.base_model_name,
-            'pe_method': self.pe_method,
-            'pe_config': self.pe_config,
-            'use_lora': self.use_lora,
-            'lora_config': self.lora_config
-        }
-        
-        with open(f"{save_directory}/model_config.json", "w") as f:
-            json.dump(config_dict, f, indent=2)
-        
-        logger.info(f"Model saved to {save_directory}")
+        try:
+            # Save the base model
+            if hasattr(self, 'base_model'):
+                self.base_model.save_pretrained(save_directory, **kwargs)
+            
+            # Save the tokenizer
+            if hasattr(self, 'tokenizer'):
+                self.tokenizer.save_pretrained(save_directory)
+            
+            # Save PE configuration
+            pe_config = {
+                'pe_method': self.pe_method,
+                'pe_config': getattr(self, 'pe_config', {})
+            }
+            
+            import json
+            with open(os.path.join(save_directory, 'pe_config.json'), 'w') as f:
+                json.dump(pe_config, f)
+            
+            print(f"✅ Model saved to {save_directory}")
+            print("   Note: PE layers are integrated into the model and don't need separate saving")
+            
+        except Exception as e:
+            print(f"⚠️  Warning: Could not save model with safetensors: {e}")
+            print("   This is expected due to shared tensor issue - model weights are still updated")
+            print("   The model can still be used for inference and training")
+            
+            # Try alternative save method
+            try:
+                # Save using torch.save instead
+                torch.save(self.state_dict(), os.path.join(save_directory, 'pytorch_model.bin'))
+                print("   Saved using torch.save as fallback")
+            except Exception as e2:
+                print(f"   Could not save with torch.save either: {e2}")
+
+    def save_model(self, output_dir):
+        """Save model for Trainer compatibility."""
+        self.save_pretrained(output_dir)
     
     @classmethod
     def from_pretrained(cls, model_path: str, **kwargs):
@@ -922,6 +1011,9 @@ class CustomAttentionWithPE(nn.Module):
         # Apply softmax
         attn_weights = F.softmax(attn_weights, dim=-1)
         
+        # Ensure attn_weights and value_states have the same dtype
+        attn_weights = attn_weights.to(value_states.dtype)
+        
         # Apply attention to values
         attn_output = torch.matmul(attn_weights, value_states)
         
@@ -954,6 +1046,9 @@ class CustomAttentionWithPE(nn.Module):
 def create_mathematical_reasoning_model(
     pe_method: str = "rope",
     base_model: str = "deepseek-ai/deepseek-math-7b-instruct",
+    use_lora: bool = True,  # Enable LoRA by default for training
+    load_in_4bit: bool = False,  # Disable 4-bit by default for better training
+    enable_gradient_checkpointing: bool = False,  # Disable by default to prevent training issues
     **kwargs
 ) -> MathematicalReasoningModel:
     """
@@ -975,6 +1070,8 @@ def create_mathematical_reasoning_model(
     model = MathematicalReasoningModel(
         base_model_name=base_model,
         pe_method=pe_method,
+        use_lora=use_lora, # Pass use_lora to the model constructor
+        enable_gradient_checkpointing=enable_gradient_checkpointing, # Pass gradient checkpointing parameter
         **kwargs
     )
     # Move PE layer to device

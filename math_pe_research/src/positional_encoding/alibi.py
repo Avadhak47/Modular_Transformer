@@ -130,24 +130,12 @@ class ALiBiPositionalEncoding(nn.Module):
             Input tensor (unchanged) or attention scores with bias applied
         """
         if attention_scores is not None:
-            # Apply bias to attention scores
             batch_size, num_heads, seq_len_q, seq_len_k = attention_scores.shape
             bias = self.get_bias(max(seq_len_q, seq_len_k))
-            
-            # Ensure bias matches attention score dimensions
-            if bias.shape[0] != num_heads:
-                # Repeat or slice bias to match number of heads
-                if bias.shape[0] < num_heads:
-                    repeat_factor = (num_heads + bias.shape[0] - 1) // bias.shape[0]  # Ceiling division
-                    bias = bias.repeat(repeat_factor, 1, 1)
-                bias = bias[:num_heads]
-            
-            # bias is now (num_heads, seq_len, seq_len), need to make it (batch_size, num_heads, seq_len_q, seq_len_k)
-            bias = bias.unsqueeze(0)  # (1, num_heads, seq_len, seq_len)
-            bias = bias.expand(batch_size, num_heads, seq_len_q, seq_len_k)
-            
-            # Apply bias
-            return attention_scores + bias
+            # Ensure bias shape matches attention_scores
+            if bias.shape[-2:] != (seq_len_q, seq_len_k):
+                bias = bias[:, :seq_len_q, :seq_len_k]
+            return attention_scores + bias[:num_heads]
         
         # If no attention scores provided, just return input
         return x

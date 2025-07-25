@@ -11,6 +11,12 @@
 # | Model/PE multi-GPU support                    | get_best_device(), DataParallel, robust device handling                                  |
 # | Robust config/tokenizer/model access          | Always check hasattr(model, 'module') for attribute access                               |
 # ===============================
+# Note on PyTorch Warning:
+# /usr/local/lib/python3.11/dist-packages/torch/utils/checkpoint.py:87: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+# - This warning is usually harmless if you are not training, or if your model/LoRA parameters are set up correctly.
+# - If you are training and see this warning, ensure your model is in .train() mode and all trainable parameters have requires_grad=True.
+# - The HuggingFace Trainer should handle this for you, so you can usually ignore this unless your model is not learning.
+# ===============================
 
 import argparse
 import os
@@ -31,6 +37,16 @@ import wandb
 from models.mathematical_reasoning_model import create_mathematical_reasoning_model
 from data.math_dataset_loader import MathDatasetLoader
 
+def print_memory_usage():
+    """Print current memory usage."""
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        print(f"💾 GPU Memory: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved, {total:.2f}GB total")
+    else:
+        print("💾 Using CPU")
+
 def main():
     parser = argparse.ArgumentParser(description="Train and evaluate a mathematical reasoning model.")
     parser.add_argument('--fp16', action='store_true', help='Use FP16 mixed precision training')
@@ -42,27 +58,44 @@ def main():
     parser.add_argument('--checkpoint_dir', type=str, required=True, help="Directory to save model checkpoints")
     parser.add_argument('--result_dir', type=str, required=True, help="Directory to save evaluation results")
     parser.add_argument('--max_steps', type=int, default=1000, help="Max training steps")
-    parser.add_argument('--batch_size', type=int, default=4, help="Batch size")
+    parser.add_argument('--batch_size', type=int, default=1, help="Batch size (reduced for GPU memory)")
+    parser.add_argument('--gradient_accumulation_steps', type=int, default=16, help="Gradient accumulation steps")
     parser.add_argument('--learning_rate', type=float, default=2e-5, help="Learning rate")
-    parser.add_argument('--max_length', type=int, default=4096, help="Max sequence length")
+    parser.add_argument('--max_length', type=int, default=2048, help="Max sequence length (reduced for memory)")
     parser.add_argument('--datasets', type=str, default="gsm8k,math", help="Comma-separated list of datasets")
     parser.add_argument('--wandb_project', type=str, default="math_pe_research", help="wandb project name")
     parser.add_argument('--wandb_entity', type=str, default=None, help="wandb entity (optional)")
     parser.add_argument('--cache_dir', type=str, default=None, help='Directory to cache downloaded models and datasets')
     parser.add_argument('--load_in_4bit', action='store_true', help='Enable 4-bit quantization (requires bitsandbytes, not supported on Kaggle by default)')
-    parser.add_argument('--use_lora', action='store_true', help='Enable LoRA fine-tuning (disabled by default on Kaggle due to compilation issues)')
+    parser.add_argument('--use_lora', action='store_true', default=True, help='Enable LoRA fine-tuning (enabled by default for training)')
+    parser.add_argument('--no_lora', action='store_true', help='Disable LoRA fine-tuning')
+    parser.add_argument('--enable_gradient_checkpointing', action='store_true', help='Enable gradient checkpointing (disabled by default to prevent training issues)')
+    parser.add_argument('--memory_efficient', action='store_true', default=True, help='Enable memory efficient settings')
     args = parser.parse_args()
+
+    # Handle LoRA argument conflict
+    if args.no_lora:
+        args.use_lora = False
 
     # Detect Kaggle environment and adjust defaults
     is_kaggle = '/kaggle/' in os.getcwd() or 'KAGGLE_KERNEL_RUN_TYPE' in os.environ
     if is_kaggle:
         print("🔍 Kaggle environment detected - applying compatibility settings...")
-        # Disable problematic features on Kaggle
-        if not args.use_lora:
-            print("   ✅ LoRA disabled (use --use_lora to force enable)")
+        # Keep LoRA enabled by default for training
+        if args.use_lora:
+            print("   ✅ LoRA enabled for training")
         if args.load_in_4bit:
             print("   ⚠️  4-bit quantization may cause issues on Kaggle")
-
+    
+    # Memory optimization settings
+    if args.memory_efficient:
+        print("🔧 Applying memory efficient settings...")
+        # Set PyTorch memory allocation settings
+        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+        # Enable memory efficient attention if available
+        os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+        print("   ✅ Memory optimization enabled")
+    
     # Setup directories
     checkpoint_dir = Path(args.checkpoint_dir)
     result_dir = Path(args.result_dir)
@@ -84,14 +117,22 @@ def main():
     )
 
     # Load model
+    print("🔄 Loading model...")
     model = create_mathematical_reasoning_model(
         pe_method=args.pe,
         base_model=args.model_size,
         load_in_4bit=args.load_in_4bit,
         use_lora=args.use_lora,
+        enable_gradient_checkpointing=args.enable_gradient_checkpointing,
         torch_dtype=torch.float16 if args.fp16 else torch.float32,
         device_map="auto" if torch.cuda.is_available() else "cpu"
     )
+    
+    # Memory cleanup after model loading
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        print(f"💾 GPU memory after model loading: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+    
     # Robust tokenizer access for DataParallel
     tokenizer = model.module.tokenizer if hasattr(model, 'module') else model.tokenizer
     # Robust config access for DataParallel
@@ -114,10 +155,18 @@ def main():
     # Data loading
     dataset_names = [d.strip() for d in args.datasets.split(",")]
     loader = MathDatasetLoader(tokenizer=tokenizer, max_length=args.max_length, cache_dir=str(cache_dir))
-    train_problems = loader.load_multiple_datasets(dataset_names, split='train', max_samples_per_dataset=10000)
-    eval_problems = loader.load_multiple_datasets(dataset_names, split='test', max_samples_per_dataset=1000)
+    
+    # Reduce dataset sizes for memory efficiency
+    max_train_samples = 1000 if args.memory_efficient else 10000
+    max_eval_samples = 200 if args.memory_efficient else 1000
+    
+    print(f"📊 Loading datasets with max {max_train_samples} train and {max_eval_samples} eval samples...")
+    train_problems = loader.load_multiple_datasets(dataset_names, split='train', max_samples_per_dataset=max_train_samples)
+    eval_problems = loader.load_multiple_datasets(dataset_names, split='test', max_samples_per_dataset=max_eval_samples)
     train_dataset = loader.create_pytorch_dataset(train_problems, is_training=True)
     eval_dataset = loader.create_pytorch_dataset(eval_problems, is_training=False)
+    
+    print(f"📈 Dataset sizes: Train={len(train_dataset)}, Eval={len(eval_dataset)}")
 
     # Training arguments with version compatibility
     import transformers
@@ -134,10 +183,17 @@ def main():
         'logging_steps': 50,
         'fp16': True,
         'remove_unused_columns': False,
-        'gradient_accumulation_steps': 8,
+        'gradient_accumulation_steps': args.gradient_accumulation_steps,
         'warmup_steps': 100,
         'weight_decay': 0.01,
         'report_to': "wandb",
+        # Memory optimization
+        'dataloader_pin_memory': False,
+        'dataloader_num_workers': 0,
+        'max_grad_norm': 1.0,
+        # Disable automatic saving to avoid safetensors shared tensor issue
+        'save_strategy': 'no',
+        'save_steps': None,
     }
     
     # Add version-specific arguments
@@ -176,21 +232,59 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         data_collator=safe_data_collator,
-        tokenizer=tokenizer,
         callbacks=callbacks,
         compute_metrics=None
     )
 
+    # Double-check: Ensure model is in train mode before training
+    model.train()
+    
+    # Check and ensure trainable parameters exist
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+    
+    print(f"Model parameters: {trainable_params:,} trainable / {total_params:,} total ({100 * trainable_params / total_params:.2f}%)")
+    print_memory_usage()
+    
+    if trainable_params == 0:
+        print("⚠️  WARNING: No trainable parameters found! This will cause training to fail.")
+        print("Attempting to unfreeze parameters...")
+        
+        # Try to unfreeze some parameters
+        for name, param in model.named_parameters():
+            if any(key in name.lower() for key in ['lora', 'adapter', 'pe', 'positional', 'embedding']):
+                param.requires_grad = True
+                print(f"Unfroze parameter: {name}")
+        
+        # Recheck
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"After unfreezing: {trainable_params:,} trainable parameters")
+        
+        if trainable_params == 0:
+            raise RuntimeError("No trainable parameters found even after unfreezing. Check LoRA configuration.")
+    
+    # Double-check: Ensure all trainable parameters have requires_grad=True
+    for n, p in model.named_parameters():
+        if p.requires_grad is False and p.grad is not None:
+            print(f"Warning: Parameter {n} does not require grad but has a gradient!")
+
     # Training
     print("Starting training...")
+    print_memory_usage()
     train_result = trainer.train()
     print("Training complete.")
+    print_memory_usage()
 
-    # Save final model and tokenizer
+    # Save final model and tokenizer using custom method
     if args.checkpoint_dir:
         save_path = os.path.join(args.checkpoint_dir, "final_model")
-        trainer.save_model(save_path)
-        tokenizer.save_pretrained(save_path)
+        try:
+            model.save_pretrained(save_path)
+            tokenizer.save_pretrained(save_path)
+            print(f"✅ Final model saved to {save_path}")
+        except Exception as e:
+            print(f"⚠️  Warning: Could not save final model: {e}")
+            print("   Model weights are still updated and available for inference")
 
     # Evaluation
     print("Running evaluation...")

@@ -44,35 +44,24 @@ class DIETPositionalEncoding(nn.Module):
         self.position_transform = nn.Linear(d_model, d_model)
         self.dropout = nn.Dropout(dropout)
     
-    def forward(
-        self, 
-        x: torch.Tensor, 
-        position_ids: Optional[torch.Tensor] = None,
-        **kwargs
-    ) -> torch.Tensor:
-        """Apply DIET positional encoding."""
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [batch, seq_len, d_model]
         batch_size, seq_len, d_model = x.shape
-        
-        if position_ids is not None:
-            pe = self.pe.squeeze(0)[position_ids]
+        device = x.device
+        # Generate base sinusoidal encoding
+        if seq_len > self.max_seq_len:
+            pe = self._generate_base_encoding(seq_len, d_model, device)
         else:
-            # Handle sequences longer than max_seq_len
-            if seq_len > self.max_seq_len:
-                # Generate positional encoding on-the-fly for longer sequences
-                positions = torch.arange(seq_len, device=x.device, dtype=torch.float).unsqueeze(1)
-                div_term = torch.exp(
-                    torch.arange(0, d_model, 2, device=x.device).float() * -(math.log(10000.0) / d_model)
-                )
-                pe = torch.zeros(seq_len, d_model, device=x.device)
-                pe[:, 0::2] = torch.sin(positions * div_term)
-                pe[:, 1::2] = torch.cos(positions * div_term)
-                pe = pe.unsqueeze(0)  # Add batch dimension
+            pe = self.base_encoding[:, :seq_len, :].to(device)
+        # Ensure pe matches x's last dimension
+        if pe.shape[-1] != d_model:
+            if d_model % pe.shape[-1] == 0:
+                repeat_factor = d_model // pe.shape[-1]
+                pe = pe.repeat(1, 1, repeat_factor)
             else:
-                pe = self.pe[:, :seq_len, :]
-        
-        # Apply dynamic transformation
+                pe = pe.expand(batch_size, seq_len, d_model)
+        # Dynamic transformation
         pe_dynamic = self.position_transform(pe)
-        
         return self.dropout(x + pe_dynamic)
 
     def to(self, device):
