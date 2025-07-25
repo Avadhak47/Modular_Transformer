@@ -73,7 +73,8 @@ class MathDatasetLoader:
         cache_dir: str = "./data_cache",
         enable_augmentation: bool = True,
         augmentation_ratio: float = 0.3,
-        preprocessing_workers: int = 4
+        preprocessing_workers: int = 4,
+        streaming: bool = False  # New parameter for large datasets
     ):
         self.tokenizer = tokenizer
         self.max_length = max_length
@@ -82,6 +83,7 @@ class MathDatasetLoader:
         self.enable_augmentation = enable_augmentation
         self.augmentation_ratio = augmentation_ratio
         self.preprocessing_workers = preprocessing_workers
+        self.streaming = streaming  # Enable streaming for large datasets
         
         # Dataset registry
         self.dataset_configs = {
@@ -169,29 +171,50 @@ class MathDatasetLoader:
         split: str,
         max_samples: Optional[int]
     ) -> List[MathProblem]:
-        """Load dataset from HuggingFace."""
+        """Load dataset from HuggingFace with streaming support for large datasets."""
         
         config = self.dataset_configs[dataset_name]
         
         try:
-            # Load dataset
-            if 'subset' in config:
-                dataset = load_dataset(config['hf_name'], config['subset'], split=split)
+            # Load dataset with streaming for large datasets
+            if self.streaming and max_samples and max_samples > 100000:
+                logger.info(f"Using streaming mode for large dataset: {dataset_name}")
+                if 'subset' in config:
+                    dataset = load_dataset(config['hf_name'], config['subset'], split=split, streaming=True)
+                else:
+                    dataset = load_dataset(config['hf_name'], split=split, streaming=True)
+                
+                # Process streaming dataset
+                problems = []
+                for i, item in enumerate(dataset):
+                    if max_samples and i >= max_samples:
+                        break
+                    problem = self._process_dataset_item(item, config, dataset_name)
+                    if problem:
+                        problems.append(problem)
+                    if i % 10000 == 0:
+                        logger.info(f"Processed {i:,} samples from {dataset_name}")
+                
+                return problems
             else:
-                dataset = load_dataset(config['hf_name'], split=split)
-            
-            # Limit samples if specified
-            if max_samples and len(dataset) > max_samples:
-                dataset = dataset.select(range(max_samples))
-            
-            # Process dataset
-            problems = []
-            for item in dataset:
-                problem = self._process_dataset_item(item, config, dataset_name)
-                if problem:
-                    problems.append(problem)
-            
-            return problems
+                # Standard loading for smaller datasets
+                if 'subset' in config:
+                    dataset = load_dataset(config['hf_name'], config['subset'], split=split)
+                else:
+                    dataset = load_dataset(config['hf_name'], split=split)
+                
+                # Limit samples if specified
+                if max_samples and len(dataset) > max_samples:
+                    dataset = dataset.select(range(max_samples))
+                
+                # Process dataset
+                problems = []
+                for item in dataset:
+                    problem = self._process_dataset_item(item, config, dataset_name)
+                    if problem:
+                        problems.append(problem)
+                
+                return problems
             
         except Exception as e:
             logger.error(f"Failed to load {dataset_name} from HuggingFace: {e}")

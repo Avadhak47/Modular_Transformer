@@ -549,6 +549,15 @@ class MathematicalReasoningModel(nn.Module):
         
         return None, None
     
+    def _get_pe_parameter(self, pe_layer, param_name, layer_idx):
+        """Helper function to get PE parameter by unique name."""
+        unique_name = f'{param_name}_layer_{layer_idx}'
+        if hasattr(pe_layer, unique_name):
+            return getattr(pe_layer, unique_name)
+        else:
+            # Fallback to original name if unique name doesn't exist
+            return getattr(pe_layer, param_name, None)
+
     def _initialize_pe_parameters(self, pe_layer, layer_idx):
         """Initialize PE parameters with unique names to avoid sharing, and ensure tensor size consistency."""
         # Remove all old parameters and buffers to avoid shared tensors
@@ -560,9 +569,9 @@ class MathematicalReasoningModel(nn.Module):
             new_param = nn.Parameter(param.data.clone().detach())
             unique_name = f'{name}_layer_{layer_idx}'
             pe_layer.register_parameter(unique_name, new_param)
-            setattr(pe_layer, unique_name, new_param)
-            # Set canonical attribute for code compatibility
-            setattr(pe_layer, name, new_param)
+            # DO NOT set canonical name as attribute to avoid shared memory
+            # setattr(pe_layer, name, new_param)  # REMOVED THIS LINE
+        
         for name, buffer in list(pe_layer.named_buffers()):
             if name in pe_layer._buffers:
                 del pe_layer._buffers[name]
@@ -571,9 +580,16 @@ class MathematicalReasoningModel(nn.Module):
             new_buffer = buffer.data.clone().detach()
             unique_name = f'{name}_layer_{layer_idx}'
             pe_layer.register_buffer(unique_name, new_buffer)
-            setattr(pe_layer, unique_name, new_buffer)
-            # Set canonical attribute for code compatibility
-            setattr(pe_layer, name, new_buffer)
+            # DO NOT set canonical name as attribute to avoid shared memory
+            # setattr(pe_layer, name, new_buffer)  # REMOVED THIS LINE
+        
+        # Set up parameter access methods for the PE layer
+        def get_param(param_name):
+            return self._get_pe_parameter(pe_layer, param_name, layer_idx)
+        
+        # Add parameter access methods to PE layer
+        pe_layer.get_param = get_param
+        
         # Ensure input/output tensor size consistency for PE
         if hasattr(pe_layer, 'd_model') and hasattr(self, 'config'):
             pe_layer.d_model = self.config.hidden_size
@@ -877,26 +893,31 @@ class CustomAttentionWithPE(nn.Module):
         logger.debug(f"Final detected attention params: num_heads={self.num_heads}, "
                     f"hidden_size={self.hidden_size}, head_dim={self.head_dim}")
 
-    def _apply_pe(self, hidden_states, query_states=None, key_states=None, position_ids=None, token_ids=None, seq_len=None):
+    def _apply_pe(self, hidden_states, query_states=None, key_states=None, position_ids=None, token_ids=None, seq_len=None, attention_scores=None):
         """Apply the correct PE logic for each PE type."""
         # RoPE: expects [batch, heads, seq_len, head_dim]
         if self.pe_method in ['rope']:
-            # query_states/key_states: [batch, heads, seq_len, head_dim]
-            # If not already in [batch, heads, seq_len, head_dim], transpose
             if query_states is not None and key_states is not None:
                 return self.pe_layer(query_states, key_states)
             else:
                 raise ValueError("RoPE/m-adaptive PE requires query_states and key_states.")
-        # Sinusoidal, t5_relative, diet: expects [batch, seq_len, hidden_dim] (additive)
-        elif self.pe_method in ['sinusoidal', 't5_relative', 'diet']:
-            # hidden_states: [batch, seq_len, hidden_dim]
+        # T5Relative: expects attention_scores to be passed
+        elif self.pe_method == 't5_relative':
+            if hasattr(self.pe_layer, 'forward'):
+                if attention_scores is not None:
+                    return self.pe_layer(hidden_states, attention_scores=attention_scores)
+                else:
+                    raise ValueError("T5RelativePositionalBias requires attention_scores argument.")
+            else:
+                raise ValueError(f"PE {self.pe_method} does not support forward.")
+        # Sinusoidal, diet: expects [batch, seq_len, hidden_dim] (additive)
+        elif self.pe_method in ['sinusoidal', 'diet']:
             if hasattr(self.pe_layer, 'forward'):
                 return self.pe_layer(hidden_states)
             else:
                 raise ValueError(f"PE {self.pe_method} does not support forward.")
         # MathAdaptive: expects [batch, seq_len, hidden_dim] with token_ids
         elif self.pe_method == 'math_adaptive':
-            # hidden_states: [batch, seq_len, hidden_dim]
             if hasattr(self.pe_layer, 'forward'):
                 if token_ids is not None:
                     return self.pe_layer(hidden_states, token_ids=token_ids)
@@ -906,17 +927,14 @@ class CustomAttentionWithPE(nn.Module):
                 raise ValueError(f"PE {self.pe_method} does not support forward.")
         # Alibi: expects [batch, heads, seq_len, head_dim] or [batch, seq_len, hidden_dim]
         elif self.pe_method == 'alibi':
-            # Some Alibi impls expect [batch, heads, seq_len, head_dim], some [batch, seq_len, hidden_dim]
             if hasattr(self.pe_layer, 'forward'):
                 try:
                     return self.pe_layer(hidden_states, position_ids=position_ids)
                 except Exception:
-                    # Try with [batch, heads, seq_len, head_dim]
                     return self.pe_layer(hidden_states)
             else:
                 raise ValueError("Alibi PE does not support forward.")
         else:
-            # Default: pass through
             return hidden_states
 
     def forward(
@@ -1019,6 +1037,12 @@ class CustomAttentionWithPE(nn.Module):
             if attention_mask.dim() == 2:
                 attention_mask = attention_mask.unsqueeze(1).unsqueeze(1)  # [batch, 1, 1, seq_len]
             attn_weights = attn_weights + attention_mask
+        
+        # --- PATCH: Add T5RelativePositionalBias before softmax ---
+        if self.pe_method == 't5_relative':
+            # hidden_states is not used, so pass a dummy tensor (e.g., query_states)
+            attn_weights = self._apply_pe(query_states, attention_scores=attn_weights)
+        # --- END PATCH ---
         
         # Apply softmax
         attn_weights = F.softmax(attn_weights, dim=-1)

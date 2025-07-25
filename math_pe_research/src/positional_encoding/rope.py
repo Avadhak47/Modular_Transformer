@@ -88,10 +88,22 @@ class RotaryPositionalEmbedding(nn.Module):
         positions = torch.arange(seq_len, device=device, dtype=torch.float32)
         # Always move learned parameters to the correct device
         if hasattr(self, 'position_scaling'):
-            positions = positions * self.position_scaling.to(device)
+            # Try to get parameter using unique name access if available
+            if hasattr(self, 'get_param'):
+                position_scaling = self.get_param('position_scaling')
+                if position_scaling is not None:
+                    positions = positions * position_scaling.to(device)
+            else:
+                positions = positions * self.position_scaling.to(device)
         inv_freq = self.inv_freq.to(device)
         if hasattr(self, 'freq_enhancement'):
-            inv_freq = inv_freq * self.freq_enhancement.to(device)
+            # Try to get parameter using unique name access if available
+            if hasattr(self, 'get_param'):
+                freq_enhancement = self.get_param('freq_enhancement')
+                if freq_enhancement is not None:
+                    inv_freq = inv_freq * freq_enhancement.to(device)
+            else:
+                inv_freq = inv_freq * self.freq_enhancement.to(device)
         freqs = torch.outer(positions, inv_freq)
         cos = torch.cos(freqs)
         sin = torch.sin(freqs)
@@ -170,9 +182,21 @@ class RotaryPositionalEmbedding(nn.Module):
     def to(self, device):
         super().to(device)
         if hasattr(self, 'position_scaling'):
-            self.position_scaling = self.position_scaling.to(device)
+            # Try to get parameter using unique name access if available
+            if hasattr(self, 'get_param'):
+                position_scaling = self.get_param('position_scaling')
+                if position_scaling is not None:
+                    position_scaling = position_scaling.to(device)
+            else:
+                self.position_scaling = self.position_scaling.to(device)
         if hasattr(self, 'freq_enhancement'):
-            self.freq_enhancement = self.freq_enhancement.to(device)
+            # Try to get parameter using unique name access if available
+            if hasattr(self, 'get_param'):
+                freq_enhancement = self.get_param('freq_enhancement')
+                if freq_enhancement is not None:
+                    freq_enhancement = freq_enhancement.to(device)
+            else:
+                self.freq_enhancement = self.freq_enhancement.to(device)
         if hasattr(self, 'inv_freq'):
             self.inv_freq = self.inv_freq.to(device)
         return self
@@ -227,9 +251,21 @@ class MathematicalRoPE(RotaryPositionalEmbedding):
     def to(self, device):
         super().to(device)
         if hasattr(self, 'position_scaling'):
-            self.position_scaling = self.position_scaling.to(device)
+            # Try to get parameter using unique name access if available
+            if hasattr(self, 'get_param'):
+                position_scaling = self.get_param('position_scaling')
+                if position_scaling is not None:
+                    position_scaling = position_scaling.to(device)
+            else:
+                self.position_scaling = self.position_scaling.to(device)
         if hasattr(self, 'freq_enhancement'):
-            self.freq_enhancement = self.freq_enhancement.to(device)
+            # Try to get parameter using unique name access if available
+            if hasattr(self, 'get_param'):
+                freq_enhancement = self.get_param('freq_enhancement')
+                if freq_enhancement is not None:
+                    freq_enhancement = freq_enhancement.to(device)
+            else:
+                self.freq_enhancement = self.freq_enhancement.to(device)
         if hasattr(self, 'inv_freq'):
             self.inv_freq = self.inv_freq.to(device)
         if hasattr(self, 'mathematical_bias'):
@@ -280,9 +316,21 @@ class LongSequenceRoPE(RotaryPositionalEmbedding):
     def to(self, device):
         super().to(device)
         if hasattr(self, 'position_scaling'):
-            self.position_scaling = self.position_scaling.to(device)
+            # Try to get parameter using unique name access if available
+            if hasattr(self, 'get_param'):
+                position_scaling = self.get_param('position_scaling')
+                if position_scaling is not None:
+                    position_scaling = position_scaling.to(device)
+            else:
+                self.position_scaling = self.position_scaling.to(device)
         if hasattr(self, 'freq_enhancement'):
-            self.freq_enhancement = self.freq_enhancement.to(device)
+            # Try to get parameter using unique name access if available
+            if hasattr(self, 'get_param'):
+                freq_enhancement = self.get_param('freq_enhancement')
+                if freq_enhancement is not None:
+                    freq_enhancement = freq_enhancement.to(device)
+            else:
+                self.freq_enhancement = self.freq_enhancement.to(device)
         if hasattr(self, 'inv_freq'):
             self.inv_freq = self.inv_freq.to(device)
         return self

@@ -22,7 +22,11 @@ import argparse
 import os
 import sys
 import json
+import random
+import shutil
 from pathlib import Path
+from typing import List, Dict, Optional, Tuple
+import pickle
 
 # Add the src directory to Python path for module imports
 script_dir = Path(__file__).parent
@@ -33,9 +37,235 @@ sys.path.insert(0, str(src_dir))
 import torch
 from transformers import TrainingArguments, Trainer, EarlyStoppingCallback, DataCollatorForLanguageModeling
 import wandb
+from sklearn.metrics import accuracy_score
+import numpy as np
 
 from models.mathematical_reasoning_model import create_mathematical_reasoning_model
 from data.math_dataset_loader import MathDatasetLoader
+
+class AdaptiveCheckpointCallback:
+    """
+    Custom callback for adaptive checkpointing with model comparison and random initialization.
+    Saves models every 10K samples, compares performance, keeps best 5, and randomly initializes.
+    """
+    
+    def __init__(
+        self,
+        checkpoint_dir: Path,
+        save_every_samples: int = 10000,
+        keep_best_models: int = 5,
+        eval_metrics: List[str] = ['eval_loss', 'eval_accuracy'],
+        random_seed: int = 42
+    ):
+        self.checkpoint_dir = checkpoint_dir
+        self.save_every_samples = save_every_samples
+        self.keep_best_models = keep_best_models
+        self.eval_metrics = eval_metrics
+        self.random_seed = random_seed
+        self.best_models = []  # List of (model_path, metrics) tuples
+        self.samples_trained = 0
+        self.last_save_samples = 0
+        
+        # Create checkpoint subdirectories
+        self.models_dir = checkpoint_dir / "adaptive_models"
+        self.models_dir.mkdir(exist_ok=True)
+        self.metrics_file = checkpoint_dir / "model_metrics.json"
+        
+        # Load existing metrics if available
+        self._load_metrics()
+        
+        print(f"🔄 Adaptive checkpointing initialized:")
+        print(f"   📁 Models directory: {self.models_dir}")
+        print(f"   💾 Save every {self.save_every_samples:,} samples")
+        print(f"   🏆 Keep best {self.keep_best_models} models")
+        print(f"   📊 Tracking metrics: {self.eval_metrics}")
+    
+    def _load_metrics(self):
+        """Load existing model metrics from file."""
+        if self.metrics_file.exists():
+            try:
+                with open(self.metrics_file, 'r') as f:
+                    data = json.load(f)
+                    self.best_models = data.get('best_models', [])
+                    self.samples_trained = data.get('samples_trained', 0)
+                    self.last_save_samples = data.get('last_save_samples', 0)
+                print(f"📈 Loaded {len(self.best_models)} existing model metrics")
+            except Exception as e:
+                print(f"⚠️  Could not load existing metrics: {e}")
+    
+    def _save_metrics(self):
+        """Save current model metrics to file."""
+        data = {
+            'best_models': self.best_models,
+            'samples_trained': self.samples_trained,
+            'last_save_samples': self.last_save_samples
+        }
+        with open(self.metrics_file, 'w') as f:
+            json.dump(data, f, indent=2)
+    
+    def _evaluate_model(self, model, eval_dataset, tokenizer) -> Dict[str, float]:
+        """Evaluate model and return metrics."""
+        model.eval()
+        total_loss = 0.0
+        correct_predictions = 0
+        total_predictions = 0
+        
+        # Sample a subset for quick evaluation
+        eval_subset = torch.utils.data.Subset(eval_dataset, 
+                                             random.sample(range(len(eval_dataset)), 
+                                                         min(100, len(eval_dataset))))
+        
+        with torch.no_grad():
+            for batch in torch.utils.data.DataLoader(eval_subset, batch_size=1, shuffle=False):
+                input_ids = batch['input_ids'].to(model.device)
+                attention_mask = batch['attention_mask'].to(model.device)
+                labels = batch['labels'].to(model.device)
+                
+                outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+                loss = outputs.loss
+                total_loss += loss.item()
+                
+                # Simple accuracy calculation (you can enhance this)
+                logits = outputs.logits
+                predictions = torch.argmax(logits, dim=-1)
+                correct_predictions += (predictions == labels).sum().item()
+                total_predictions += labels.numel()
+        
+        model.train()
+        
+        return {
+            'eval_loss': total_loss / len(eval_subset),
+            'eval_accuracy': correct_predictions / total_predictions if total_predictions > 0 else 0.0
+        }
+    
+    def _save_model(self, model, tokenizer, metrics: Dict[str, float], step: int):
+        """Save model with metrics."""
+        model_path = self.models_dir / f"model_step_{step}_loss_{metrics.get('eval_loss', 0):.4f}"
+        
+        try:
+            # Save model
+            model.save_pretrained(str(model_path))
+            tokenizer.save_pretrained(str(model_path))
+            
+            # Save metrics
+            metrics_file = model_path / "metrics.json"
+            with open(metrics_file, 'w') as f:
+                json.dump(metrics, f, indent=2)
+            
+            # Add to best models list
+            self.best_models.append({
+                'path': str(model_path),
+                'step': step,
+                'metrics': metrics,
+                'samples_trained': self.samples_trained
+            })
+            
+            # Sort by primary metric (eval_loss) and keep only best models
+            self.best_models.sort(key=lambda x: x['metrics'].get('eval_loss', float('inf')))
+            self.best_models = self.best_models[:self.keep_best_models]
+            
+            # Save updated metrics
+            self._save_metrics()
+            
+            print(f"💾 Saved model at step {step}:")
+            print(f"   📁 Path: {model_path}")
+            print(f"   📊 Loss: {metrics.get('eval_loss', 0):.4f}")
+            print(f"   🎯 Accuracy: {metrics.get('eval_accuracy', 0):.4f}")
+            print(f"   🏆 Best models kept: {len(self.best_models)}")
+            
+            return str(model_path)
+            
+        except Exception as e:
+            print(f"❌ Failed to save model: {e}")
+            return None
+    
+    def _load_random_best_model(self, model_class, **kwargs):
+        """Load a random model from the best models list."""
+        if not self.best_models:
+            print("⚠️  No best models available, starting fresh")
+            return None
+        
+        # Set random seed for reproducibility
+        random.seed(self.random_seed)
+        
+        # Select random model from best models
+        selected_model = random.choice(self.best_models)
+        model_path = selected_model['path']
+        
+        try:
+            print(f"🔄 Loading random best model:")
+            print(f"   📁 Path: {model_path}")
+            print(f"   📊 Loss: {selected_model['metrics'].get('eval_loss', 0):.4f}")
+            print(f"   🎯 Accuracy: {selected_model['metrics'].get('eval_accuracy', 0):.4f}")
+            
+            # Load model
+            model = model_class.from_pretrained(model_path, **kwargs)
+            return model
+            
+        except Exception as e:
+            print(f"❌ Failed to load model from {model_path}: {e}")
+            return None
+    
+    def on_step_end(self, args, state, control, model, tokenizer, eval_dataset, **kwargs):
+        """Called at the end of each training step."""
+        # Update samples trained
+        self.samples_trained += args.per_device_train_batch_size * args.gradient_accumulation_steps
+        
+        # Check if we should save a checkpoint
+        if (self.samples_trained - self.last_save_samples) >= self.save_every_samples:
+            print(f"\n🔄 Adaptive checkpointing triggered at {self.samples_trained:,} samples")
+            
+            # Evaluate current model
+            metrics = self._evaluate_model(model, eval_dataset, tokenizer)
+            
+            # Save model
+            saved_path = self._save_model(model, tokenizer, metrics, state.global_step)
+            
+            if saved_path:
+                self.last_save_samples = self.samples_trained
+                
+                # Optionally load a random best model for next phase
+                if len(self.best_models) > 1:  # Only if we have multiple models
+                    print("🎲 Randomly selecting best model for next phase...")
+                    # Note: In a real implementation, you'd restart training with the selected model
+                    # For now, we just log the selection
+                    selected = random.choice(self.best_models)
+                    print(f"   🎯 Selected: {selected['path']}")
+    
+    def get_best_model_path(self) -> Optional[str]:
+        """Get the path of the best performing model."""
+        if not self.best_models:
+            return None
+        
+        # Return the model with lowest eval_loss
+        best_model = min(self.best_models, key=lambda x: x['metrics'].get('eval_loss', float('inf')))
+        return best_model['path']
+
+class AdaptiveTrainer(Trainer):
+    """
+    Custom Trainer that integrates with adaptive checkpointing.
+    """
+    
+    def __init__(self, adaptive_callback=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.adaptive_callback = adaptive_callback
+    
+    def training_step(self, model, inputs):
+        """Override training step to integrate adaptive checkpointing."""
+        result = super().training_step(model, inputs)
+        
+        # Call adaptive checkpointing callback if available
+        if self.adaptive_callback:
+            self.adaptive_callback.on_step_end(
+                args=self.args,
+                state=self.state,
+                control=None,
+                model=model,
+                tokenizer=self.tokenizer,
+                eval_dataset=self.eval_dataset
+            )
+        
+        return result
 
 def print_memory_usage():
     """Print current memory usage."""
@@ -71,6 +301,13 @@ def main():
     parser.add_argument('--no_lora', action='store_true', help='Disable LoRA fine-tuning')
     parser.add_argument('--enable_gradient_checkpointing', action='store_true', help='Enable gradient checkpointing (disabled by default to prevent training issues)')
     parser.add_argument('--memory_efficient', action='store_true', default=True, help='Enable memory efficient settings')
+    parser.add_argument('--large_scale_training', action='store_true', help='Enable large-scale training for OpenMathInstruct-1M')
+    parser.add_argument('--max_train_samples', type=int, default=None, help='Maximum training samples per dataset (None for full dataset)')
+    parser.add_argument('--max_eval_samples', type=int, default=None, help='Maximum evaluation samples per dataset (None for full dataset)')
+    parser.add_argument('--adaptive_checkpointing', action='store_true', help='Enable adaptive checkpointing with model comparison')
+    parser.add_argument('--save_every_samples', type=int, default=10000, help='Save model every N samples')
+    parser.add_argument('--keep_best_models', type=int, default=5, help='Number of best models to keep')
+    parser.add_argument('--random_seed', type=int, default=42, help='Random seed for model selection')
     args = parser.parse_args()
 
     # Handle LoRA argument conflict
@@ -95,6 +332,24 @@ def main():
         # Enable memory efficient attention if available
         os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
         print("   ✅ Memory optimization enabled")
+    
+    # Large-scale training optimizations
+    if args.large_scale_training:
+        print("🚀 Applying large-scale training optimizations...")
+        # Reduce batch size for large datasets
+        if args.batch_size > 1:
+            args.batch_size = max(1, args.batch_size // 2)
+            print(f"   📉 Reduced batch size to {args.batch_size} for memory efficiency")
+        
+        # Increase gradient accumulation to maintain effective batch size
+        if args.gradient_accumulation_steps < 32:
+            args.gradient_accumulation_steps = min(64, args.gradient_accumulation_steps * 2)
+            print(f"   📈 Increased gradient accumulation to {args.gradient_accumulation_steps}")
+        
+        # Enable more aggressive memory optimizations
+        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size_mb:128'
+        os.environ['CUDA_LAUNCH_BLOCKING'] = '0'
+        print("   ✅ Large-scale optimizations enabled")
     
     # Setup directories
     checkpoint_dir = Path(args.checkpoint_dir)
@@ -152,15 +407,33 @@ def main():
             filtered_features.append(filtered_feature)
         return base_data_collator(filtered_features)
     
-    # Data loading
+    # Data loading with large-scale support
     dataset_names = [d.strip() for d in args.datasets.split(",")]
-    loader = MathDatasetLoader(tokenizer=tokenizer, max_length=args.max_length, cache_dir=str(cache_dir))
+    # Enable streaming for large datasets
+    streaming_enabled = args.large_scale_training and any('openmath' in name.lower() for name in dataset_names)
+    loader = MathDatasetLoader(
+        tokenizer=tokenizer, 
+        max_length=args.max_length, 
+        cache_dir=str(cache_dir),
+        streaming=streaming_enabled
+    )
     
-    # Reduce dataset sizes for memory efficiency
-    max_train_samples = 1000 if args.memory_efficient else 10000
-    max_eval_samples = 200 if args.memory_efficient else 1000
+    if streaming_enabled:
+        print("📡 Streaming mode enabled for large dataset loading")
     
-    print(f"📊 Loading datasets with max {max_train_samples} train and {max_eval_samples} eval samples...")
+    # Configure dataset sizes based on training mode
+    if args.large_scale_training:
+        # For OpenMathInstruct-1M: use 70-80% for training
+        max_train_samples = args.max_train_samples or 800000  # 800K for training
+        max_eval_samples = args.max_eval_samples or 200000    # 200K for evaluation
+        print(f"🚀 Large-scale training mode: {max_train_samples:,} train, {max_eval_samples:,} eval samples")
+    else:
+        # Memory-efficient mode for smaller datasets
+        max_train_samples = args.max_train_samples or (1000 if args.memory_efficient else 10000)
+        max_eval_samples = args.max_eval_samples or (200 if args.memory_efficient else 1000)
+        print(f"📊 Standard training mode: {max_train_samples:,} train, {max_eval_samples:,} eval samples")
+    
+    print(f"📊 Loading datasets with max {max_train_samples:,} train and {max_eval_samples:,} eval samples...")
     train_problems = loader.load_multiple_datasets(dataset_names, split='train', max_samples_per_dataset=max_train_samples)
     eval_problems = loader.load_multiple_datasets(dataset_names, split='test', max_samples_per_dataset=max_eval_samples)
     train_dataset = loader.create_pytorch_dataset(train_problems, is_training=True)
@@ -226,15 +499,42 @@ def main():
     if transformers_version >= version.parse("4.0.0"):
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=3, early_stopping_threshold=0.00001))
     
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        data_collator=safe_data_collator,
-        callbacks=callbacks,
-        compute_metrics=None
-    )
+    # Add adaptive checkpointing callback
+    if args.adaptive_checkpointing:
+        adaptive_callback = AdaptiveCheckpointCallback(
+            checkpoint_dir=checkpoint_dir,
+            save_every_samples=args.save_every_samples,
+            keep_best_models=args.keep_best_models,
+            random_seed=args.random_seed
+        )
+        callbacks.append(adaptive_callback)
+        print(f"🔄 Adaptive checkpointing enabled:")
+        print(f"   💾 Save every {args.save_every_samples:,} samples")
+        print(f"   🏆 Keep best {args.keep_best_models} models")
+        print(f"   🎲 Random seed: {args.random_seed}")
+    
+    # Use custom trainer for adaptive checkpointing
+    if args.adaptive_checkpointing:
+        trainer = AdaptiveTrainer(
+            adaptive_callback=adaptive_callback,
+            model=model,
+            args=training_args,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            data_collator=safe_data_collator,
+            callbacks=callbacks,
+            compute_metrics=None
+        )
+    else:
+        trainer = Trainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            data_collator=safe_data_collator,
+            callbacks=callbacks,
+            compute_metrics=None
+        )
 
     # Double-check: Ensure model is in train mode before training
     model.train()
@@ -274,6 +574,15 @@ def main():
     train_result = trainer.train()
     print("Training complete.")
     print_memory_usage()
+
+    # Get best model path if using adaptive checkpointing
+    best_model_path = None
+    if args.adaptive_checkpointing:
+        best_model_path = adaptive_callback.get_best_model_path()
+        if best_model_path:
+            print(f"🏆 Best model found: {best_model_path}")
+        else:
+            print("⚠️  No best model found in adaptive checkpointing")
 
     # Save final model and tokenizer using custom method
     if args.checkpoint_dir:
