@@ -1,3 +1,17 @@
+# ===============================
+# Recent Fixes Summary Table
+# ===============================
+# | Issue/Request                                 | Fix/Change                                                                                 |
+# |-----------------------------------------------|------------------------------------------------------------------------------------------|
+# | DataParallel attribute error                  | Use model.module.tokenizer if hasattr(model, 'module') else model.tokenizer everywhere   |
+# | AttributeError: 'Namespace' has no fp16       | Add --fp16 argument to ArgumentParser                                                     |
+# | RecursionError in data_collator               | Rename wrapper to safe_data_collator, use in Trainer                                      |
+# | Device mismatch for PE/model                  | All PE/model .to(device), DataParallel for multi-GPU, input tensors moved to device      |
+# | All PE parameters on correct device           | .to(device) methods for all PE classes                                                   |
+# | Model/PE multi-GPU support                    | get_best_device(), DataParallel, robust device handling                                  |
+# | Robust config/tokenizer/model access          | Always check hasattr(model, 'module') for attribute access                               |
+# ===============================
+
 import argparse
 import os
 import sys
@@ -19,6 +33,7 @@ from data.math_dataset_loader import MathDatasetLoader
 
 def main():
     parser = argparse.ArgumentParser(description="Train and evaluate a mathematical reasoning model.")
+    parser.add_argument('--fp16', action='store_true', help='Use FP16 mixed precision training')
     parser.add_argument('--model_size', type=str, default="deepseek-ai/deepseek-math-7b-instruct",
                         help="Base model size/name (e.g., deepseek-ai/deepseek-math-7b-instruct, deepseek-ai/deepseek-math-1.3b-instruct, etc.)")
     parser.add_argument('--pe', type=str, default="rope", choices=["rope", "alibi", "sinusoidal", "diet", "t5_relative", "math_adaptive"],
@@ -68,38 +83,34 @@ def main():
         config=vars(args)
     )
 
-    # Model and tokenizer
+    # Load model
     model = create_mathematical_reasoning_model(
         pe_method=args.pe,
         base_model=args.model_size,
         load_in_4bit=args.load_in_4bit,
         use_lora=args.use_lora,
-        cache_dir=args.cache_dir
+        torch_dtype=torch.float16 if args.fp16 else torch.float32,
+        device_map="auto" if torch.cuda.is_available() else "cpu"
     )
-    tokenizer = model.tokenizer
+    # Robust tokenizer access for DataParallel
+    tokenizer = model.module.tokenizer if hasattr(model, 'module') else model.tokenizer
+    # Robust config access for DataParallel
+    config = model.module.config if hasattr(model, 'module') else model.config
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"  # Important for decoder-only models
     
     # Create data collator for causal language modeling
-    base_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=False,  # For causal LM
-        pad_to_multiple_of=None
-    )
-    
-    # Safety wrapper to filter out non-tensor fields (like metadata strings)
-    def data_collator(features):
-        # Keep only tensor-compatible fields
-        tensor_fields = ['input_ids', 'attention_mask', 'labels']
+    base_data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
+
+    def safe_data_collator(features):
+        tensor_fields = {"input_ids", "attention_mask", "labels"}
         filtered_features = []
-        
         for feature in features:
             filtered_feature = {k: v for k, v in feature.items() if k in tensor_fields or isinstance(v, (list, int, float))}
             filtered_features.append(filtered_feature)
-        
-        return base_collator(filtered_features)
-
+        return base_data_collator(filtered_features)
+    
     # Data loading
     dataset_names = [d.strip() for d in args.datasets.split(",")]
     loader = MathDatasetLoader(tokenizer=tokenizer, max_length=args.max_length, cache_dir=str(cache_dir))
@@ -160,13 +171,14 @@ def main():
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=3, early_stopping_threshold=0.00001))
     
     trainer = Trainer(
-        model=model.base_model,
+        model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        data_collator=safe_data_collator,
         tokenizer=tokenizer,
-        data_collator=data_collator,
-        callbacks=callbacks
+        callbacks=callbacks,
+        compute_metrics=None
     )
 
     # Training
@@ -174,9 +186,11 @@ def main():
     train_result = trainer.train()
     print("Training complete.")
 
-    # Save model and tokenizer
-    print(f"Saving model and tokenizer to {checkpoint_dir} ...")
-    model.save_pretrained(str(checkpoint_dir))
+    # Save final model and tokenizer
+    if args.checkpoint_dir:
+        save_path = os.path.join(args.checkpoint_dir, "final_model")
+        trainer.save_model(save_path)
+        tokenizer.save_pretrained(save_path)
 
     # Evaluation
     print("Running evaluation...")

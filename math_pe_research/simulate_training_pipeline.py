@@ -182,10 +182,10 @@ class TrainingSimulator:
                 torch_dtype=torch.float32,
                 device_map="auto" if torch.cuda.is_available() else "cpu"
             )
-            self.tokenizer = self.model.tokenizer
+            self.tokenizer = self.model.module.tokenizer if hasattr(self.model, 'module') else self.model.tokenizer
             print(f"✅ Model created successfully with {self.pe_method} PE")
             print(f"   Device: {next(self.model.parameters()).device if not hasattr(self.model, 'module') else next(self.model.module.parameters()).device}")
-            print(f"   Parameters: {sum(p.numel() for p in self.model.parameters()):,}")
+            print(f"   Parameters: {sum(p.numel() for p in (self.model.module.parameters() if hasattr(self.model, 'module') else self.model.parameters())):,}")
         except Exception as e:
             print(f"❌ Failed to create model: {e}")
             raise

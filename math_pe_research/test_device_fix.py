@@ -59,7 +59,8 @@ def test_device_fix():
         
         # Test with a simple input
         input_text = "What is 2 + 3?"
-        input_ids = model.tokenizer.encode(input_text, return_tensors="pt")
+        tokenizer = model.module.tokenizer if hasattr(model, 'module') else model.tokenizer
+        input_ids = tokenizer.encode(input_text, return_tensors="pt")
         
         # Move input to device
         if torch.cuda.is_available():
@@ -80,12 +81,12 @@ def test_device_fix():
             input_ids=input_ids,
             max_length=50,
             do_sample=False,
-            pad_token_id=model.tokenizer.eos_token_id
+            pad_token_id=tokenizer.eos_token_id
         )
         print("✓ Generation successful")
         
         # Decode the generated text
-        generated_text = model.tokenizer.decode(generated[0], skip_special_tokens=True)
+        generated_text = tokenizer.decode(generated[0], skip_special_tokens=True)
         print(f"Generated text: {generated_text}")
         
     except Exception as e:
