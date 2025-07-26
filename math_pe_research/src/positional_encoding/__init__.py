@@ -5,31 +5,72 @@ This module contains state-of-the-art positional encoding methods optimized
 for mathematical reasoning tasks and long sequence processing.
 """
 
-from .sinusoidal import SinusoidalPositionalEncoding
-from .rope import RotaryPositionalEmbedding
-from .alibi import ALiBiPositionalEncoding
-from .diet import DIETPositionalEncoding
-from .t5_relative import T5RelativePositionalBias
-from .math_adaptive import MathAdaptivePositionalEncoding
+try:
+    from .sinusoidal import SinusoidalPositionalEncoding
+except ImportError as e:
+    print(f"Warning: Could not import SinusoidalPositionalEncoding: {e}")
+    SinusoidalPositionalEncoding = None
 
-__all__ = [
-    'SinusoidalPositionalEncoding',
-    'RotaryPositionalEmbedding',
-    'ALiBiPositionalEncoding',
-    'DIETPositionalEncoding',
-    'T5RelativePositionalBias',
-    'MathAdaptivePositionalEncoding'
-]
+try:
+    from .rope import RotaryPositionalEmbedding
+except ImportError as e:
+    print(f"Warning: Could not import RotaryPositionalEmbedding: {e}")
+    RotaryPositionalEmbedding = None
 
-# PE Method Registry for easy access
-PE_REGISTRY = {
-    'sinusoidal': SinusoidalPositionalEncoding,
-    'rope': RotaryPositionalEmbedding,
-    'alibi': ALiBiPositionalEncoding,
-    'diet': DIETPositionalEncoding,
-    't5_relative': T5RelativePositionalBias,
-    'math_adaptive': MathAdaptivePositionalEncoding
-}
+try:
+    from .alibi import ALiBiPositionalEncoding
+except ImportError as e:
+    print(f"Warning: Could not import ALiBiPositionalEncoding: {e}")
+    ALiBiPositionalEncoding = None
+
+try:
+    from .diet import DIETPositionalEncoding
+except ImportError as e:
+    print(f"Warning: Could not import DIETPositionalEncoding: {e}")
+    DIETPositionalEncoding = None
+
+try:
+    from .t5_relative import T5RelativePositionalBias
+except ImportError as e:
+    print(f"Warning: Could not import T5RelativePositionalBias: {e}")
+    T5RelativePositionalBias = None
+
+try:
+    from .math_adaptive import MathAdaptivePositionalEncoding
+except ImportError as e:
+    print(f"Warning: Could not import MathAdaptivePositionalEncoding: {e}")
+    MathAdaptivePositionalEncoding = None
+
+__all__ = []
+if SinusoidalPositionalEncoding is not None:
+    __all__.append('SinusoidalPositionalEncoding')
+if RotaryPositionalEmbedding is not None:
+    __all__.append('RotaryPositionalEmbedding')
+if ALiBiPositionalEncoding is not None:
+    __all__.append('ALiBiPositionalEncoding')
+if DIETPositionalEncoding is not None:
+    __all__.append('DIETPositionalEncoding')
+if T5RelativePositionalBias is not None:
+    __all__.append('T5RelativePositionalBias')
+if MathAdaptivePositionalEncoding is not None:
+    __all__.append('MathAdaptivePositionalEncoding')
+
+# PE Method Registry for easy access - only include successfully imported classes
+PE_REGISTRY = {}
+if SinusoidalPositionalEncoding is not None:
+    PE_REGISTRY['sinusoidal'] = SinusoidalPositionalEncoding
+if RotaryPositionalEmbedding is not None:
+    PE_REGISTRY['rope'] = RotaryPositionalEmbedding
+if ALiBiPositionalEncoding is not None:
+    PE_REGISTRY['alibi'] = ALiBiPositionalEncoding
+if DIETPositionalEncoding is not None:
+    PE_REGISTRY['diet'] = DIETPositionalEncoding
+if T5RelativePositionalBias is not None:
+    PE_REGISTRY['t5_relative'] = T5RelativePositionalBias
+if MathAdaptivePositionalEncoding is not None:
+    PE_REGISTRY['math_adaptive'] = MathAdaptivePositionalEncoding
+
+print(f"Successfully loaded PE methods: {list(PE_REGISTRY.keys())}")
 
 def get_positional_encoding(pe_type: str, **kwargs):
     """
@@ -43,8 +84,12 @@ def get_positional_encoding(pe_type: str, **kwargs):
         Positional encoding instance
     """
     if pe_type not in PE_REGISTRY:
+        available_types = list(PE_REGISTRY.keys())
+        if not available_types:
+            raise ValueError(f"No positional encoding methods successfully loaded! "
+                           f"Check import errors above.")
         raise ValueError(f"Unknown positional encoding type: {pe_type}. "
-                        f"Available types: {list(PE_REGISTRY.keys())}")
+                        f"Available types: {available_types}")
     
     # Filter kwargs based on PE type to avoid argument mismatches
     pe_class = PE_REGISTRY[pe_type]

@@ -29,7 +29,8 @@ try:
         AutoTokenizer, 
         TrainingArguments, 
         Trainer,
-        DataCollatorForLanguageModeling
+        DataCollatorForLanguageModeling,
+        EarlyStoppingCallback
     )
 except ImportError as e:
     if "cannot import name 'requires'" in str(e):
@@ -41,13 +42,56 @@ except ImportError as e:
             AutoTokenizer, 
             TrainingArguments, 
             Trainer,
-            DataCollatorForLanguageModeling
+            DataCollatorForLanguageModeling,
+            EarlyStoppingCallback
         )
     else:
         raise e
 
-from models.mathematical_reasoning_model import create_mathematical_reasoning_model
-from data.math_dataset_loader import MathDatasetLoader
+import sys
+import os
+# Add the src directory to the path - handle different working directories
+current_dir = os.path.dirname(os.path.abspath(__file__))
+src_path = os.path.join(current_dir, '..', 'src')
+if os.path.exists(src_path):
+    sys.path.insert(0, src_path)
+else:
+    # Try alternative paths
+    alt_paths = [
+        os.path.join(current_dir, 'src'),
+        os.path.join(os.getcwd(), 'src'),
+        os.path.join(os.getcwd(), 'math_pe_research', 'src')
+    ]
+    for path in alt_paths:
+        if os.path.exists(path):
+            sys.path.insert(0, path)
+            break
+
+print(f"🔍 Python path: {sys.path[:3]}...")
+print(f"🔍 Current working directory: {os.getcwd()}")
+print(f"🔍 Script directory: {current_dir}")
+
+try:
+    from models.mathematical_reasoning_model import create_mathematical_reasoning_model
+    print("✅ Successfully imported create_mathematical_reasoning_model")
+except ImportError as e:
+    print(f"❌ Import error: {e}")
+    print("🔍 Available modules in src:")
+    try:
+        import os
+        src_dir = os.path.join(current_dir, '..', 'src')
+        if os.path.exists(src_dir):
+            print(f"   📁 {src_dir}: {os.listdir(src_dir)}")
+    except Exception as e2:
+        print(f"   ❌ Could not list src directory: {e2}")
+    raise
+
+try:
+    from data.math_dataset_loader import MathDatasetLoader
+    print("✅ Successfully imported MathDatasetLoader")
+except ImportError as e:
+    print(f"❌ Import error: {e}")
+    raise
 import wandb
 from sklearn.metrics import accuracy_score
 import random
@@ -383,6 +427,17 @@ def main():
         config=vars(args)
     )
 
+    # Check for existing checkpoints
+    checkpoint_dir = Path(args.checkpoint_dir)
+    existing_checkpoints = list(checkpoint_dir.glob("checkpoint-*"))
+    latest_checkpoint = None
+    
+    if existing_checkpoints:
+        # Find the latest checkpoint
+        latest_checkpoint = max(existing_checkpoints, key=lambda x: int(x.name.split("-")[-1]))
+        print(f"📁 Found existing checkpoint: {latest_checkpoint}")
+        print(f"   🎯 Will resume training from checkpoint")
+    
     # Load model
     print("🔄 Loading model...")
     model = create_mathematical_reasoning_model(
@@ -394,6 +449,44 @@ def main():
         torch_dtype=torch.float16 if args.fp16 else torch.float32,
         device_map="auto" if torch.cuda.is_available() else "cpu"
     )
+    
+    # Load checkpoint if available
+    if latest_checkpoint:
+        try:
+            # Try different checkpoint file formats
+            checkpoint_paths = [
+                latest_checkpoint / "pytorch_model.bin",
+                latest_checkpoint / "adapter_model.bin",
+                latest_checkpoint / "model.safetensors"
+            ]
+            
+            checkpoint_loaded = False
+            for checkpoint_path in checkpoint_paths:
+                if checkpoint_path.exists():
+                    print(f"🔄 Loading model weights from {checkpoint_path}")
+                    if checkpoint_path.suffix == '.safetensors':
+                        from safetensors import safe_open
+                        with safe_open(checkpoint_path, framework="pt", device="cpu") as f:
+                            state_dict = {key: f.get_tensor(key) for key in f.keys()}
+                    else:
+                        state_dict = torch.load(checkpoint_path, map_location='cpu')
+                    
+                    # Load state dict with strict=False to handle missing keys
+                    missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+                    if missing_keys:
+                        print(f"⚠️  Missing keys: {missing_keys[:5]}...")
+                    if unexpected_keys:
+                        print(f"⚠️  Unexpected keys: {unexpected_keys[:5]}...")
+                    
+                    print("✅ Checkpoint loaded successfully")
+                    checkpoint_loaded = True
+                    break
+            
+            if not checkpoint_loaded:
+                print("⚠️  No checkpoint files found, starting fresh training")
+        except Exception as e:
+            print(f"⚠️  Failed to load checkpoint: {e}")
+            print("Starting fresh training...")
     
     # Memory cleanup after model loading
     if torch.cuda.is_available():
@@ -430,6 +523,16 @@ def main():
         streaming=streaming_enabled
     )
     
+    # Clear cache to force fresh dataset loading
+    print("🧹 Clearing dataset cache to force fresh loading...")
+    cache_files = list(cache_dir.glob("*.pkl"))
+    for cache_file in cache_files:
+        try:
+            cache_file.unlink()
+            print(f"   🗑️  Deleted cache: {cache_file.name}")
+        except Exception as e:
+            print(f"   ⚠️  Could not delete cache {cache_file.name}: {e}")
+    
     if streaming_enabled:
         print("📡 Streaming mode enabled for large dataset loading")
     
@@ -440,18 +543,39 @@ def main():
         max_eval_samples = args.max_eval_samples or 200000    # 200K for evaluation
         print(f"🚀 Large-scale training mode: {max_train_samples:,} train, {max_eval_samples:,} eval samples")
     else:
-        # Memory-efficient mode for smaller datasets
-        max_train_samples = args.max_train_samples or (1000 if args.memory_efficient else 10000)
-        max_eval_samples = args.max_eval_samples or (200 if args.memory_efficient else 1000)
-        print(f"📊 Standard training mode: {max_train_samples:,} train, {max_eval_samples:,} eval samples")
+        # Load more problems for better training
+        max_train_samples = args.max_train_samples or 50000  # 50K for training
+        max_eval_samples = args.max_eval_samples or 10000   # 10K for evaluation
+        print(f"📊 Enhanced training mode: {max_train_samples:,} train, {max_eval_samples:,} eval samples")
     
     print(f"📊 Loading datasets with max {max_train_samples:,} train and {max_eval_samples:,} eval samples...")
     train_problems = loader.load_multiple_datasets(dataset_names, split='train', max_samples_per_dataset=max_train_samples)
-    eval_problems = loader.load_multiple_datasets(dataset_names, split='test', max_samples_per_dataset=max_eval_samples)
+    eval_problems = loader.load_multiple_datasets(dataset_names, split='validation', max_samples_per_dataset=max_eval_samples)
+    
+    print(f"📦 Raw problems loaded: Train={len(train_problems)}, Eval={len(eval_problems)}")
+    
+    # Check if datasets are empty
+    if len(train_problems) == 0:
+        print("⚠️  No training problems loaded! Using fallback dataset...")
+        train_problems = loader._load_fallback_dataset(dataset_names[0], 'train', max_train_samples or 1000)
+        print(f"📦 Fallback problems loaded: Train={len(train_problems)}")
+    
+    if len(eval_problems) == 0:
+        print("⚠️  No evaluation problems loaded! Using fallback dataset...")
+        eval_problems = loader._load_fallback_dataset(dataset_names[0], 'test', max_eval_samples or 200)
+        print(f"📦 Fallback problems loaded: Eval={len(eval_problems)}")
+    
     train_dataset = loader.create_pytorch_dataset(train_problems, is_training=True)
     eval_dataset = loader.create_pytorch_dataset(eval_problems, is_training=False)
     
     print(f"📈 Dataset sizes: Train={len(train_dataset)}, Eval={len(eval_dataset)}")
+    
+    # Final check for empty datasets
+    if len(train_dataset) == 0:
+        raise ValueError("Training dataset is empty! Cannot proceed with training.")
+    if len(eval_dataset) == 0:
+        print("⚠️  Evaluation dataset is empty, using training dataset for evaluation...")
+        eval_dataset = train_dataset
 
     # Training arguments with version compatibility
     import transformers
@@ -524,6 +648,32 @@ def main():
         print(f"   💾 Save every {args.save_every_samples:,} samples")
         print(f"   🏆 Keep best {args.keep_best_models} models")
         print(f"   🎲 Random seed: {args.random_seed}")
+    
+    # Add custom callback to save only PE weights
+    class PECheckpointCallback:
+        def __init__(self, output_dir):
+            self.output_dir = Path(output_dir)
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        def on_save(self, args, state, control, **kwargs):
+            """Save only PE weights during training."""
+            if hasattr(kwargs.get('model', None), 'base_model'):
+                model = kwargs['model']
+                pe_state_dict = {}
+                
+                # Extract PE weights from the model
+                for name, param in model.named_parameters():
+                    if 'pe_layer' in name or 'positional' in name.lower():
+                        pe_state_dict[name] = param.data.clone()
+                
+                # Save PE weights
+                pe_checkpoint_path = self.output_dir / f"pe_weights_step_{state.global_step}.safetensors"
+                from safetensors.torch import save_file
+                save_file(pe_state_dict, pe_checkpoint_path)
+                print(f"💾 Saved PE weights to {pe_checkpoint_path}")
+    
+    pe_callback = PECheckpointCallback(args.output_dir)
+    callbacks.append(pe_callback)
     
     # Use custom trainer for adaptive checkpointing
     if args.adaptive_checkpointing:

@@ -95,6 +95,21 @@ class RotaryPositionalEmbedding(nn.Module):
                     positions = positions * position_scaling.to(device)
             else:
                 positions = positions * self.position_scaling.to(device)
+        # Ensure inv_freq exists and is properly initialized
+        if not hasattr(self, 'inv_freq') or self.inv_freq is None:
+            print(f"⚠️  inv_freq not found, reinitializing...")
+            try:
+                inv_freq = self._compute_inv_freq()
+                self.register_buffer('inv_freq', inv_freq)
+                print(f"✅ inv_freq reinitialized with shape: {inv_freq.shape}")
+            except Exception as e:
+                print(f"❌ Failed to reinitialize inv_freq: {e}")
+                # Create a fallback inv_freq
+                fallback_inv_freq = torch.arange(0, self.dim, 2, dtype=torch.float32)
+                fallback_inv_freq = 1.0 / (self.base ** (fallback_inv_freq / self.dim))
+                self.register_buffer('inv_freq', fallback_inv_freq)
+                print(f"✅ Using fallback inv_freq with shape: {fallback_inv_freq.shape}")
+        
         inv_freq = self.inv_freq.to(device)
         if hasattr(self, 'freq_enhancement'):
             # Try to get parameter using unique name access if available
@@ -123,17 +138,47 @@ class RotaryPositionalEmbedding(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # q, k: [batch, num_heads, seq_len, head_dim]
         # cos, sin: [seq_len, head_dim] or [seq_len, head_dim//2]
+        
+        # Validate tensor shapes
+        if q.dim() != 4:
+            print(f"⚠️  Query tensor has unexpected shape: {q.shape}")
+            # Reshape if needed
+            if q.dim() == 3:
+                # [batch, seq_len, hidden_dim] -> [batch, 1, seq_len, hidden_dim]
+                q = q.unsqueeze(1)
+                k = k.unsqueeze(1)
+            else:
+                raise ValueError(f"Query tensor must be 3D or 4D, got {q.dim()}D")
+        
         seq_len = q.shape[2]
         head_dim = q.shape[3]
         # Expand cos/sin to [seq_len, head_dim] if needed
         if cos.shape[-1] != head_dim:
+            print(f"🔍 Adjusting cos/sin from {cos.shape[-1]} to {head_dim}")
             if head_dim % cos.shape[-1] == 0:
                 repeat_factor = head_dim // cos.shape[-1]
                 cos = cos.repeat(1, repeat_factor)
                 sin = sin.repeat(1, repeat_factor)
+            elif cos.shape[-1] % head_dim == 0:
+                # Truncate to match head_dim
+                cos = cos[:, :head_dim]
+                sin = sin[:, :head_dim]
             else:
-                cos = cos.expand(seq_len, head_dim)
-                sin = sin.expand(seq_len, head_dim)
+                # Interpolate to match head_dim
+                cos_resized = torch.nn.functional.interpolate(
+                    cos.unsqueeze(0).unsqueeze(0), 
+                    size=(seq_len, head_dim), 
+                    mode='bilinear', 
+                    align_corners=False
+                ).squeeze(0).squeeze(0)
+                sin_resized = torch.nn.functional.interpolate(
+                    sin.unsqueeze(0).unsqueeze(0), 
+                    size=(seq_len, head_dim), 
+                    mode='bilinear', 
+                    align_corners=False
+                ).squeeze(0).squeeze(0)
+                cos = cos_resized
+                sin = sin_resized
         cos = cos.unsqueeze(0).unsqueeze(0)  # [1, 1, seq_len, head_dim]
         sin = sin.unsqueeze(0).unsqueeze(0)
         q_embed = (q * cos) + (self.rotate_half(q) * sin)
@@ -157,11 +202,14 @@ class RotaryPositionalEmbedding(nn.Module):
         Returns:
             Rotated query and key tensors
         """
+        print(f"🔍 RoPE forward - Query shape: {query.shape}, Key shape: {key.shape}")
+        
         if seq_len is None:
             seq_len = query.size(-2)
         
         # Get cos/sin values
         cos, sin = self._get_cos_sin(seq_len, query.device)
+        print(f"🔍 RoPE cos/sin shapes: {cos.shape}, {sin.shape}")
         
         # Apply rotary embedding
         return self.apply_rotary_pos_emb(query, key, cos, sin)

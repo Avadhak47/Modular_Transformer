@@ -580,8 +580,9 @@ class MathematicalReasoningModel(nn.Module):
             new_buffer = buffer.data.clone().detach()
             unique_name = f'{name}_layer_{layer_idx}'
             pe_layer.register_buffer(unique_name, new_buffer)
-            # DO NOT set canonical name as attribute to avoid shared memory
-            # setattr(pe_layer, name, new_buffer)  # REMOVED THIS LINE
+            # Keep essential buffers accessible by their original names
+            if name in ['inv_freq', 'position_ids']:
+                setattr(pe_layer, name, new_buffer)
         
         # Set up parameter access methods for the PE layer
         def get_param(param_name):
@@ -894,6 +895,15 @@ class CustomAttentionWithPE(nn.Module):
                     f"hidden_size={self.hidden_size}, head_dim={self.head_dim}")
 
     def _apply_pe(self, hidden_states, query_states=None, key_states=None, position_ids=None, token_ids=None, seq_len=None, attention_scores=None):
+        """Apply positional encoding to query and key states."""
+        
+        # Debug tensor shapes
+        if query_states is not None:
+            print(f"🔍 Query states shape: {query_states.shape}")
+        if key_states is not None:
+            print(f"🔍 Key states shape: {key_states.shape}")
+        if hidden_states is not None:
+            print(f"🔍 Hidden states shape: {hidden_states.shape}")
         """Apply the correct PE logic for each PE type."""
         # RoPE: expects [batch, heads, seq_len, head_dim]
         if self.pe_method in ['rope']:

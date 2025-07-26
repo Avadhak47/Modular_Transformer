@@ -149,10 +149,13 @@ class MathDatasetLoader:
                 return pickle.load(f)
         
         logger.info(f"Loading {dataset_name} dataset (split: {split})")
+        print(f"   🔍 Loading {dataset_name} dataset (split: {split})")
         
         if dataset_name in self.dataset_configs:
+            print(f"   📊 Found config for {dataset_name}, loading from HuggingFace...")
             problems = self._load_huggingface_dataset(dataset_name, split, max_samples)
         else:
+            print(f"   📁 No config for {dataset_name}, trying local files...")
             problems = self._load_local_dataset(dataset_name, split, max_samples)
         
         if shuffle:
@@ -209,15 +212,37 @@ class MathDatasetLoader:
                 
                 # Process dataset
                 problems = []
-                for item in dataset:
+                print(f"   📊 Processing {len(dataset)} items from {dataset_name}...")
+                for i, item in enumerate(dataset):
+                    if i % 1000 == 0:
+                        print(f"   📈 Processed {i:,} items...")
                     problem = self._process_dataset_item(item, config, dataset_name)
                     if problem:
                         problems.append(problem)
+                    if max_samples and len(problems) >= max_samples:
+                        print(f"   ✅ Reached max_samples limit: {max_samples}")
+                        break
                 
                 return problems
             
         except Exception as e:
             logger.error(f"Failed to load {dataset_name} from HuggingFace: {e}")
+            print(f"   ❌ Failed to load {dataset_name} from HuggingFace: {e}")
+            print(f"   🔄 Using fallback dataset...")
+            
+            # Try to get more specific error information
+            if "split" in str(e).lower():
+                print(f"   💡 Available splits for {dataset_name}:")
+                try:
+                    from datasets import load_dataset
+                    dataset_info = load_dataset(config['hf_name'], streaming=False)
+                    if hasattr(dataset_info, 'keys'):
+                        print(f"      Available: {list(dataset_info.keys())}")
+                    else:
+                        print(f"      Dataset info: {dataset_info}")
+                except Exception as info_e:
+                    print(f"      Could not get dataset info: {info_e}")
+            
             return self._load_fallback_dataset(dataset_name, split, max_samples)
     
     def _load_local_dataset(
@@ -450,7 +475,9 @@ class MathDatasetLoader:
         all_problems = []
         
         for dataset_name in dataset_names:
+            print(f"📊 Loading dataset: {dataset_name}")
             problems = self.load_dataset(dataset_name, split, max_samples_per_dataset)
+            print(f"   ✅ Loaded {len(problems)} problems from {dataset_name}")
             all_problems.extend(problems)
             logger.info(f"Added {len(problems)} problems from {dataset_name}")
         
@@ -460,6 +487,7 @@ class MathDatasetLoader:
         # Shuffle combined dataset
         random.shuffle(all_problems)
         
+        print(f"📦 Total problems loaded: {len(all_problems)}")
         logger.info(f"Combined dataset: {len(all_problems)} total problems")
         return all_problems
     
@@ -536,11 +564,12 @@ class MathDatasetLoader:
         """Fallback dataset loading for when HuggingFace fails."""
         
         logger.warning(f"Using fallback data for {dataset_name}")
+        print(f"   🎲 Generating fallback data for {dataset_name}")
         
         # Generate synthetic mathematical problems as fallback
         fallback_problems = []
         
-        for i in range(min(100, max_samples or 100)):
+        for i in range(min(max_samples or 1000, max_samples or 1000)):
             # Generate simple arithmetic problems
             a, b = random.randint(1, 100), random.randint(1, 100)
             op = random.choice(['+', '-', '*'])
@@ -567,6 +596,7 @@ class MathDatasetLoader:
                 source=f"{dataset_name}_fallback"
             ))
         
+        print(f"   ✅ Generated {len(fallback_problems)} fallback problems")
         return fallback_problems
 
 
