@@ -1083,7 +1083,7 @@ def create_mathematical_reasoning_model(
     pe_method: str = "rope",
     base_model: str = "deepseek-ai/deepseek-math-7b-instruct",
     use_lora: bool = True,  # Enable LoRA by default for training
-    load_in_4bit: bool = False,  # Disable 4-bit by default for better training
+    load_in_4bit: bool = False,  # Disable 4-bit by default to avoid bitsandbytes issues
     enable_gradient_checkpointing: bool = False,  # Disable by default to prevent training issues
     **kwargs
 ) -> MathematicalReasoningModel:

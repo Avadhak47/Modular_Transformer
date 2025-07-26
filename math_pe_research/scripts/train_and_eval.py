@@ -1,47 +1,59 @@
-# ===============================
-# Recent Fixes Summary Table
-# ===============================
-# | Issue/Request                                 | Fix/Change                                                                                 |
-# |-----------------------------------------------|------------------------------------------------------------------------------------------|
-# | DataParallel attribute error                  | Use model.module.tokenizer if hasattr(model, 'module') else model.tokenizer everywhere   |
-# | AttributeError: 'Namespace' has no fp16       | Add --fp16 argument to ArgumentParser                                                     |
-# | RecursionError in data_collator               | Rename wrapper to safe_data_collator, use in Trainer                                      |
-# | Device mismatch for PE/model                  | All PE/model .to(device), DataParallel for multi-GPU, input tensors moved to device      |
-# | All PE parameters on correct device           | .to(device) methods for all PE classes                                                   |
-# | Model/PE multi-GPU support                    | get_best_device(), DataParallel, robust device handling                                  |
-# | Robust config/tokenizer/model access          | Always check hasattr(model, 'module') for attribute access                               |
-# ===============================
-# Note on PyTorch Warning:
-# /usr/local/lib/python3.11/dist-packages/torch/utils/checkpoint.py:87: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
-# - This warning is usually harmless if you are not training, or if your model/LoRA parameters are set up correctly.
-# - If you are training and see this warning, ensure your model is in .train() mode and all trainable parameters have requires_grad=True.
-# - The HuggingFace Trainer should handle this for you, so you can usually ignore this unless your model is not learning.
-# ===============================
+#!/usr/bin/env python3
+"""
+Training and evaluation script for mathematical reasoning model.
+Updated to handle Kaggle bitsandbytes compatibility issues.
+"""
 
-import argparse
 import os
 import sys
-import json
-import random
-import shutil
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
-import pickle
-
-# Add the src directory to Python path for module imports
-script_dir = Path(__file__).parent
-project_root = script_dir.parent
-src_dir = project_root / "src"
-sys.path.insert(0, str(src_dir))
-
+import argparse
 import torch
-from transformers import TrainingArguments, Trainer, EarlyStoppingCallback, DataCollatorForLanguageModeling
-import wandb
-from sklearn.metrics import accuracy_score
 import numpy as np
+from pathlib import Path
+import warnings
+warnings.filterwarnings('ignore')
+
+# Set environment variables to avoid bitsandbytes issues
+os.environ['BITSANDBYTES_DISABLE'] = '1'
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
+# Add project paths
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root / 'src'))
+
+# Handle transformers import issues
+try:
+    from transformers import (
+        AutoTokenizer, 
+        TrainingArguments, 
+        Trainer,
+        DataCollatorForLanguageModeling
+    )
+except ImportError as e:
+    if "cannot import name 'requires'" in str(e):
+        print("Transformers import issue detected. Trying to fix...")
+        # Try to install a compatible version
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--force-reinstall", "transformers==4.35.0"])
+        from transformers import (
+            AutoTokenizer, 
+            TrainingArguments, 
+            Trainer,
+            DataCollatorForLanguageModeling
+        )
+    else:
+        raise e
 
 from models.mathematical_reasoning_model import create_mathematical_reasoning_model
 from data.math_dataset_loader import MathDatasetLoader
+import wandb
+from sklearn.metrics import accuracy_score
+import random
+import shutil
+from typing import List, Dict, Optional, Tuple
+import pickle
 
 class AdaptiveCheckpointCallback:
     """

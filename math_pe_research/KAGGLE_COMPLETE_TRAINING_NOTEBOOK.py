@@ -19,29 +19,31 @@
 # =============================================================================
 
 # Install required packages
-!pip install -q transformers==4.35.0
-!pip install -q datasets==2.14.0
-!pip install -q accelerate==0.24.0
-!pip install -q peft==0.6.0
-!pip install -q bitsandbytes==0.41.0
-!pip install -q wandb==0.15.8
-!pip install -q matplotlib==3.7.2
-!pip install -q seaborn==0.12.2
-!pip install -q pandas==2.0.3
-!pip install -q scikit-learn==1.3.0
-!pip install -q safetensors==0.4.0
+!pip install -q transformers>=4.35.0,<4.55.0
+!pip install -q peft>=0.7.0
+!pip install -q accelerate>=0.25.0
+!pip install -q datasets>=2.15.0
+!pip install -q wandb>=0.16.0
+!pip install -q safetensors>=0.4.0
+!pip install -q einops>=0.7.0
+!pip install -q sympy>=1.12
+!pip install -q scipy>=1.11.0
+!pip install -q matplotlib>=3.7.0
+!pip install -q pandas>=2.1.0
+!pip install -q scikit-learn>=1.3.0
+!pip install -q seaborn>=0.12.0
+!pip install -q tiktoken>=0.5.0
+!pip install -q sentencepiece>=0.1.99
 
-# Import libraries
+# Import required libraries
 import os
 import sys
-import json
 import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-from typing import Dict, List, Optional, Any
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -49,33 +51,29 @@ warnings.filterwarnings('ignore')
 project_root = Path('/kaggle/working/Transformer')
 sys.path.insert(0, str(project_root / 'math_pe_research' / 'src'))
 
-# Set up Kaggle environment
-os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
-os.environ['CUDA_LAUNCH_BLOCKING'] = '0'
+# Set environment variables for Kaggle compatibility
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
+# Disable bitsandbytes to avoid CUDA issues
+os.environ['BITSANDBYTES_DISABLE'] = '1'
 
 # Check GPU availability
-print("🔍 Checking GPU availability...")
+print("Checking GPU availability...")
 if torch.cuda.is_available():
-    gpu_name = torch.cuda.get_device_name(0)
-    gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-    print(f"✅ GPU Available: {gpu_name}")
-    print(f"💾 GPU Memory: {gpu_memory:.1f} GB")
+    print(f"GPU available: {torch.cuda.get_device_name()}")
+    print(f"   CUDA Version: {torch.version.cuda}")
+    print(f"   GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 else:
-    print("⚠️  No GPU available, using CPU")
+    print("No GPU available, using CPU")
 
-# Create directories
-directories = [
-    '/kaggle/working/checkpoints',
-    '/kaggle/working/results',
-    '/kaggle/working/data_cache',
-    '/kaggle/working/models'
-]
+# Create necessary directories
+os.makedirs('/kaggle/working/Transformer/math_pe_research/outputs', exist_ok=True)
+os.makedirs('/kaggle/working/Transformer/math_pe_research/checkpoints', exist_ok=True)
+os.makedirs('/kaggle/working/Transformer/math_pe_research/logs', exist_ok=True)
 
-for dir_path in directories:
-    Path(dir_path).mkdir(parents=True, exist_ok=True)
-    print(f"📁 Created directory: {dir_path}")
-
-print("✅ Environment setup complete!")
+print("Environment setup complete!")
 
 # =============================================================================
 # CELL 2: TRAINING PARAMETERS & CONFIGURATION
